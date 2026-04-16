@@ -1,0 +1,8 @@
+node_modules/
+.npm-cache/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+antigravity_whatsapp_onboarding_v2.md
