@@ -18,27 +18,27 @@ const ONBOARDING_FLOWS = {
     description: "Tarayıcıya ekle + mobil app + cliffhanger"
   },
   2: {
-    flow_id: "TODO_FLOW_ID_DAY_2",
+    flow_id: "content20260421135407_534387",
     template_name: "ai_factory_day_2",
     description: "Başarı hikayeleri"
   },
   3: {
-    flow_id: "TODO_FLOW_ID_DAY_3",
+    flow_id: "content20260421135530_976562",
     template_name: "ai_factory_day_3",
     description: "Platform turu: Classroom + Community + Mesajlar"
   },
   4: {
-    flow_id: "TODO_FLOW_ID_DAY_4",
+    flow_id: "content20260421135555_430815",
     template_name: "ai_factory_day_4",
     description: "Yıllık üyelik + JoinSecret"
   },
   5: {
-    flow_id: "TODO_FLOW_ID_DAY_5",
+    flow_id: "content20260421160009_655436",
     template_name: "ai_factory_day_5",
     description: "Takvim + etkinlikler"
   },
   6: {
-    flow_id: "TODO_FLOW_ID_DAY_6",
+    flow_id: "content20260421160043_896289",
     template_name: "ai_factory_day_6",
     description: "Affiliate programı + veda"
   }
