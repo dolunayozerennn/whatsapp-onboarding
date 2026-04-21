@@ -10,25 +10,21 @@ const log = require('../utils/logger');
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-const SYSTEM_PROMPT = `Sen bir telefon numarası validatörüsün.
-Kullanıcının girdiği metni analiz et ve SADECE aşağıdaki JSON formatında cevap ver:
-
+const SYSTEM_PROMPT = `Sen bir veri dönüştürme aracısın. Gelen metinden telefon numarasını çıkar ve SADECE JSON döndür.
+JSON formatı:
 {"valid": true, "normalized": "+905321234567", "reason": ""}
 veya
-{"valid": false, "normalized": null, "reason": "Kullanıcı numara vermek istemediğini belirtti"}
+{"valid": false, "normalized": null, "reason": "Numara yok"}
 
-Kurallar:
-- Türk GSM numaraları 5 ile başlar ve 10 hanedir (5XX XXX XX XX)
-- Eğer numara 05 ile başlıyorsa, başındaki 0'ı kaldır ve +90 ekle
-- Eğer numara 5 ile başlıyorsa ve 10 haneliyse, +90 ekle
-- Eğer +90 veya 0090 ile başlıyorsa, +90 formatına normalize et
-- Boşlukları, parantezleri, tireleri temizle
-- Eğer metin bir telefon numarası DEĞİLSE (ör: "vermek istemiyorum", "yok", "bilmiyorum", rastgele harfler), valid: false döndür ve sebebini reason'a yaz
-- Uluslararası numaralar (Türkiye dışı) da kabul et, + ile başlamalı
-- SADECE JSON döndür, başka bir şey yazma`;
+KURALLAR (KRİTİK):
+1. Rakamların sırasını ASLA değiştirme. Girdiği gibi çıkar. Halüsinasyon yaparsan sistem çöker.
+2. Sadece boşlukları ve tireleri temizle.
+3. Numara '5' ile başlıyorsa ve toplam 10 rakamsa başa '+90' ekle.
+4. Numara '05' ile başlıyorsa ve toplam 11 rakamsa başa '+9' ekle.
+5. Kullanıcı sohbet veya itiraz ediyorsa valid: false döndür.`;
 
 async function validatePhone(input) {
-  // PRIMARY: Groq GPT-OSS 120B
+  // PRIMARY: Groq LLaMA 3.3 70B (Düşük halüsinasyon, net JSON formatı)
   try {
     const response = await fetch(GROQ_API_URL, {
       method: 'POST',
@@ -37,7 +33,7 @@ async function validatePhone(input) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-4-scout-17b-16e-instruct",
+        model: "llama-3.3-70b-versatile",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: input }
