@@ -25,10 +25,17 @@ async function ensureSubscriberAndSendFlow(phoneNumber, firstName, flowId) {
 
   // 1. Subscriber'ı bulmaya çalış (custom field üzerinden)
   subscriberId = await findSubscriberByPhone(phoneNumber);
-  log.debug(`[manychat:engine] Arama sonucu:`, { subscriberId });
+  log.debug(`[manychat:engine] Arama sonucu (Custom Field):`, { subscriberId });
 
   if (!subscriberId) {
-    // 2. Yoksa oluştur
+    // 2. Eğer Custom Field'da yoksa, System Field (phone) üzerinden ara 
+    // Önceden WhatsApp'tan yazmış kişiler otomatik olarak bu alana kaydedilmiş olabilir.
+    subscriberId = await findSubscriberBySystemPhone(phoneNumber);
+    log.debug(`[manychat:engine] Arama sonucu (System Field):`, { subscriberId });
+  }
+
+  if (!subscriberId) {
+    // 3. Hala yoksa oluştur
     log.info(`[manychat:engine] Subscriber bulunamadı, oluşturuluyor...`);
     subscriberId = await createSubscriber(phoneNumber, firstName);
   } else {
@@ -41,7 +48,7 @@ async function ensureSubscriberAndSendFlow(phoneNumber, firstName, flowId) {
     throw new Error(errMsg);
   }
 
-  // 3. Custom field'ları güncelle (template değişkenleri için)
+  // 4. Custom field'ları güncelle (template değişkenleri için)
   log.debug(`[manychat:engine] Custom fields güncelleniyor...`, { subscriberId });
   await setCustomFields(subscriberId, {
     onboarding_name: firstName,
@@ -126,6 +133,34 @@ async function findSubscriberByPhone(phoneNumber) {
   }
 }
 
+async function findSubscriberBySystemPhone(phoneNumber) {
+  try {
+    // ManyChat system field araması GET isteği ile yapılır.
+    // Telefon numaralarındaki artı işareti vb. encode edilmeli.
+    const url = `${API_URL}/subscriber/findBySystemField?phone=${encodeURIComponent(phoneNumber)}`;
+    log.debug(`[manychat:api] findBySystemField (phone) isteği atılıyor.`, { url });
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers
+    });
+
+    const data = await response.json();
+    log.debug(`[manychat:api] findBySystemField (phone) yanıtı.`, data);
+
+    if (data.status === 'success' && data.data) {
+      log.info(`[manychat:api] ✅ Subscriber system field üzerinden bulundu.`, { id: data.data.id });
+      return data.data.id;
+    }
+
+    log.info(`[manychat:api] ℹ️ Subscriber system field ile bulunamadı.`);
+    return null;
+  } catch (error) {
+    log.error(`[manychat:api] ❌ findBySystemField (phone) ağ hatası: ${error.message}`, error);
+    return null;
+  }
+}
+
 async function setCustomFields(subscriberId, fields) {
   const fieldArray = Object.entries(fields).map(([name, value]) => ({
     field_name: name,
@@ -184,6 +219,7 @@ module.exports = {
   ensureSubscriberAndSendFlow,
   createSubscriber,
   findSubscriberByPhone,
+  findSubscriberBySystemPhone,
   setCustomFields,
   sendFlow
 };

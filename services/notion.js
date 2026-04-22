@@ -1,7 +1,7 @@
 // ============================================================
 // services/notion.js — Notion CRM CRUD İşlemleri
 // ============================================================
-// Onboarding veritabanı: dc72a04e-1e8d-4213-99a2-c6ddd071753c
+// Onboarding veritabanı: 0a84f19d-8dd4-4c08-9226-71d9ce71411f
 // ============================================================
 
 const { Client } = require('@notionhq/client');
