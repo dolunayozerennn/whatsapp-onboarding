@@ -200,8 +200,8 @@ require('./cron');
 // Server başlat
 // ─────────────────────────────────────────────────────────────
 const PORT = config.port;
-app.listen(PORT, '127.0.0.1', () => {
-  log.info(`WhatsApp Onboarding server başlatıldı: 127.0.0.1:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  log.info(`WhatsApp Onboarding server başlatıldı: 0.0.0.0:${PORT}`);
   log.info(`Webhook URL'ler:`);
   log.info(`  POST /webhook/new-paid-member`);
   log.info(`  POST /webhook/membership-questions`);
