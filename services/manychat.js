@@ -1,225 +1,191 @@
 // ============================================================
-// services/manychat.js — ManyChat WhatsApp API
+// services/manychat.js — ManyChat WhatsApp API Entegrasyonu
 // ============================================================
-// KRİTİK: WhatsApp business-initiated mesaj için sendFlow kullanılır.
-// sendContent KULLANILMAZ — template mesajlar flow içinde tetiklenir.
+// Subscriber oluşturma, flow tetikleme, custom field güncelleme.
+// Template mesaj stratejisi:
+//   - Subscriber zaten varsa → doğrudan sendFlow
+//   - Yoksa → önce oluştur, sonra sendFlow
 // ============================================================
 
 const { config } = require('../config/env');
+const { CUSTOM_FIELDS } = require('../config/templates');
 const log = require('../utils/logger');
 
-const API_URL = "https://api.manychat.com/fb";
-const headers = {
-  'Authorization': `Bearer ${config.manychatApiToken}`,
-  'Content-Type': 'application/json'
-};
+const BASE_URL = 'https://api.manychat.com/fb';
 
-/**
- * Ana fonksiyon: subscriber yoksa oluştur, custom field'ları set et, flow'u tetikle
- */
-async function ensureSubscriberAndSendFlow(phoneNumber, firstName, flowId) {
-  let subscriberId;
-  const context = { phoneNumber, firstName, flowId };
-  
-  log.info(`[manychat:engine] Flow tetikleme işlemi başlatıldı.`, context);
-
-  // 1. Subscriber'ı bulmaya çalış (custom field üzerinden)
-  subscriberId = await findSubscriberByPhone(phoneNumber);
-  log.debug(`[manychat:engine] Arama sonucu (Custom Field):`, { subscriberId });
-
-  if (!subscriberId) {
-    // 2. Eğer Custom Field'da yoksa, System Field (phone) üzerinden ara 
-    // Önceden WhatsApp'tan yazmış kişiler otomatik olarak bu alana kaydedilmiş olabilir.
-    subscriberId = await findSubscriberBySystemPhone(phoneNumber);
-    log.debug(`[manychat:engine] Arama sonucu (System Field):`, { subscriberId });
-  }
-
-  if (!subscriberId) {
-    // 3. Hala yoksa oluştur
-    log.info(`[manychat:engine] Subscriber bulunamadı, oluşturuluyor...`);
-    subscriberId = await createSubscriber(phoneNumber, firstName);
-  } else {
-    log.info(`[manychat:engine] Mevcut subscriber bulundu, oluşturma adımı atlanıyor.`);
-  }
-
-  if (!subscriberId) {
-    const errMsg = `Subscriber ID alınamadı (ne yaratılabildi ne de bulunabildi).`;
-    log.error(`[manychat:engine] FATAL: ${errMsg}`, context);
-    throw new Error(errMsg);
-  }
-
-  // 4. Custom field'ları güncelle (template değişkenleri için)
-  log.debug(`[manychat:engine] Custom fields güncelleniyor...`, { subscriberId });
-  await setCustomFields(subscriberId, {
-    onboarding_name: firstName,
-    whatsapp_phone_text: phoneNumber
-  });
-
-  // 4. Flow'u tetikle (template mesajı bu flow'un içinde)
-  log.info(`[manychat:engine] Flow gönderimi çağrılıyor...`, { subscriberId, flowId });
-  const flowResult = await sendFlow(subscriberId, flowId);
-
-  log.info(`[manychat:engine] ✅ Flow gönderimi başarıyla tamamlandı.`, { 
-    subscriberId, 
-    flowId, 
-    manychatStatus: flowResult.status 
-  });
-  
-  return subscriberId;
-}
-
-async function createSubscriber(phoneNumber, firstName) {
+// ─── Subscriber Oluştur / Bul + Flow Tetikle ───
+async function ensureSubscriberAndSendFlow(phone, name, flowId) {
   try {
-    const payload = {
-      first_name: firstName,
-      whatsapp_phone: phoneNumber,
-      consent_phrase: "onboarding"
-    };
-    
-    log.debug(`[manychat:api] createSubscriber isteği atılıyor.`, payload);
-    
-    const response = await fetch(`${API_URL}/subscriber/createSubscriber`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload)
-    });
+    // 1. Subscriber'a bak
+    let subscriber = await findSubscriberByPhone(phone);
 
-    const data = await response.json();
-    log.debug(`[manychat:api] createSubscriber yanıtı.`, data);
+    if (!subscriber) {
+      // 2. Yoksa oluştur
+      subscriber = await createSubscriber(phone, name);
+      log.info(`[manychat] Yeni subscriber: ${phone} (${subscriber?.id || 'id bilinmiyor'})`);
 
-    if (data.status === 'success') {
-      log.info(`[manychat:api] ✅ Yeni subscriber oluşturuldu: ${phoneNumber}`, { id: data.data.id });
-      return data.data.id;
+      // 2.5 Subscriber oluştuktan sonra kısa bekle
+      await sleep(2000);
+    } else {
+      log.info(`[manychat] Mevcut subscriber: ${phone} (${subscriber.id})`);
     }
 
-    // Subscriber zaten varsa hata döner — normal, findByCustomField ile bul
-    log.warn(`[manychat:api] ⚠️ createSubscriber başarısız (büyük ihtimalle mevcut).`, { message: data.message });
-    return await findSubscriberByPhone(phoneNumber);
+    // 3. Custom field güncelle (isim)
+    if (subscriber?.id) {
+      await setCustomField(subscriber.id, CUSTOM_FIELDS.onboarding_name, name);
+    }
 
+    // 4. Flow'u tetikle
+    await sendFlow(subscriber.id, flowId);
+    log.info(`[manychat] Flow tetiklendi: ${flowId} → ${phone}`);
+
+    return { success: true, subscriberId: subscriber.id };
   } catch (error) {
-    log.error(`[manychat:api] ❌ createSubscriber ağ hatası: ${error.message}`, error);
+    log.error(`[manychat] ensureSubscriberAndSendFlow hatası: ${error.message}`, error);
     throw error;
   }
 }
 
-async function findSubscriberByPhone(phoneNumber) {
+// ─── Subscriber Ara (telefon ile) ───
+async function findSubscriberByPhone(phone) {
   try {
-    const payload = {
-      field_name: "whatsapp_phone_text",
-      field_value: phoneNumber
-    };
-    
-    log.debug(`[manychat:api] findByCustomField isteği atılıyor.`, payload);
-    
-    const response = await fetch(`${API_URL}/subscriber/findByCustomField`, {
+    const response = await fetch(`${BASE_URL}/subscriber/findBySystemField`, {
       method: 'POST',
-      headers,
-      body: JSON.stringify(payload)
+      headers: getHeaders(),
+      body: JSON.stringify({
+        field: 'whatsapp_phone',
+        value: phone
+      })
     });
 
     const data = await response.json();
-    log.debug(`[manychat:api] findByCustomField yanıtı.`, data);
 
     if (data.status === 'success' && data.data) {
-      log.info(`[manychat:api] ✅ Subscriber başarıyla bulundu.`, { id: data.data.id });
-      return data.data.id;
+      return data.data;
     }
-
-    log.info(`[manychat:api] ℹ️ Subscriber bulunamadı.`);
     return null;
   } catch (error) {
-    log.error(`[manychat:api] ❌ findByCustomField ağ hatası: ${error.message}`, error);
+    log.error(`[manychat] findSubscriberByPhone hatası: ${error.message}`, error);
     return null;
   }
 }
 
-async function findSubscriberBySystemPhone(phoneNumber) {
+// ─── Subscriber Oluştur ───
+async function createSubscriber(phone, name) {
   try {
-    // ManyChat system field araması GET isteği ile yapılır.
-    // Telefon numaralarındaki artı işareti vb. encode edilmeli.
-    const url = `${API_URL}/subscriber/findBySystemField?phone=${encodeURIComponent(phoneNumber)}`;
-    log.debug(`[manychat:api] findBySystemField (phone) isteği atılıyor.`, { url });
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers
+    const response = await fetch(`${BASE_URL}/subscriber/createSubscriber`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        phone: phone,
+        first_name: name,
+        whatsapp_phone: phone,
+        has_opt_in_whatsapp: true,
+        consent_phrase: 'AI Factory Onboarding System'
+      })
     });
 
     const data = await response.json();
-    log.debug(`[manychat:api] findBySystemField (phone) yanıtı.`, data);
 
-    if (data.status === 'success' && data.data) {
-      log.info(`[manychat:api] ✅ Subscriber system field üzerinden bulundu.`, { id: data.data.id });
-      return data.data.id;
+    if (data.status === 'success') {
+      return data.data;
     }
 
-    log.info(`[manychat:api] ℹ️ Subscriber system field ile bulunamadı.`);
+    log.warn(`[manychat] createSubscriber uyarı: ${JSON.stringify(data)}`);
     return null;
   } catch (error) {
-    log.error(`[manychat:api] ❌ findBySystemField (phone) ağ hatası: ${error.message}`, error);
-    return null;
+    log.error(`[manychat] createSubscriber hatası: ${error.message}`, error);
+    throw error;
   }
 }
 
-async function setCustomFields(subscriberId, fields) {
-  const fieldArray = Object.entries(fields).map(([name, value]) => ({
-    field_name: name,
-    field_value: String(value)
-  }));
+// ─── Flow Tetikle ───
+async function sendFlow(subscriberId, flowNamespace) {
+  try {
+    const response = await fetch(`${BASE_URL}/sending/sendFlow`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        subscriber_id: subscriberId,
+        flow_ns: flowNamespace
+      })
+    });
 
-  const payload = {
-    subscriber_id: subscriberId,
-    fields: fieldArray
-  };
+    const data = await response.json();
 
-  log.debug(`[manychat:api] setCustomFields isteği atılıyor.`, payload);
+    if (data.status !== 'success') {
+      log.warn(`[manychat] sendFlow başarısız: ${JSON.stringify(data)}`);
+      throw new Error(`sendFlow hatası: ${data.message || JSON.stringify(data)}`);
+    }
 
-  const response = await fetch(`${API_URL}/subscriber/setCustomFields`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  const data = await response.json();
-  log.debug(`[manychat:api] setCustomFields yanıtı.`, data);
-
-  if (data.status !== 'success') {
-    log.warn(`[manychat:api] ⚠️ setCustomFields başarısız/uyarı:`, data);
-  } else {
-    log.info(`[manychat:api] ✅ Custom Fields güncellendi.`);
+    return data;
+  } catch (error) {
+    log.error(`[manychat] sendFlow hatası: ${error.message}`, error);
+    throw error;
   }
 }
 
-async function sendFlow(subscriberId, flowId) {
-  const payload = {
-    subscriber_id: subscriberId,
-    flow_ns: flowId
-  };
-  
-  log.debug(`[manychat:api] sendFlow isteği atılıyor.`, payload);
+// ─── Custom Field Güncelle ───
+async function setCustomField(subscriberId, fieldId, value) {
+  try {
+    const response = await fetch(`${BASE_URL}/subscriber/setCustomField`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        subscriber_id: subscriberId,
+        field_id: fieldId,
+        field_value: value
+      })
+    });
 
-  const response = await fetch(`${API_URL}/sending/sendFlow`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload)
-  });
+    const data = await response.json();
 
-  const data = await response.json();
-  log.debug(`[manychat:api] sendFlow yanıtı.`, data);
-
-  if (data.status !== 'success') {
-    log.error(`[manychat:api] ❌ sendFlow başarısız.`, data);
-    throw new Error(`sendFlow hatası: ${JSON.stringify(data)}`);
+    if (data.status !== 'success') {
+      log.warn(`[manychat] setCustomField başarısız: ${JSON.stringify(data)}`);
+    }
+    return data;
+  } catch (error) {
+    log.error(`[manychat] setCustomField hatası: ${error.message}`, error);
   }
+}
 
-  return data;
+// ─── Subscriber'a Tag Ekle ───
+async function addTag(subscriberId, tagName) {
+  try {
+    const response = await fetch(`${BASE_URL}/subscriber/addTag`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        subscriber_id: subscriberId,
+        tag_name: tagName
+      })
+    });
+
+    return await response.json();
+  } catch (error) {
+    log.error(`[manychat] addTag hatası: ${error.message}`, error);
+  }
+}
+
+// ─── Headers ───
+function getHeaders() {
+  return {
+    'Authorization': `Bearer ${config.manychatApiToken}`,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+}
+
+// ─── Sleep Utility ───
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 module.exports = {
   ensureSubscriberAndSendFlow,
-  createSubscriber,
   findSubscriberByPhone,
-  findSubscriberBySystemPhone,
-  setCustomFields,
-  sendFlow
+  createSubscriber,
+  sendFlow,
+  setCustomField,
+  addTag
 };

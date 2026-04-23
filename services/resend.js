@@ -1,20 +1,30 @@
 // ============================================================
 // services/resend.js — Email Fallback (Resend API)
 // ============================================================
-// Telefon numarası geçersiz olan üyeler için email onboarding.
-// Resend kurulu değilse sessizce atlanır (opsiyonel servis).
+// WhatsApp onboarding başarısız olduğunda email gönderir.
+// config.resendApiKey yoksa sessizce atlanır.
 // ============================================================
 
 const { config } = require('../config/env');
 const log = require('../utils/logger');
 
-async function sendOnboardingEmail(toEmail, firstName, dayNumber) {
+async function sendOnboardingEmail(toEmail, firstName, dayIndex) {
   if (!config.resendApiKey) {
-    log.warn(`[resend] API key yok — email gönderilmedi: ${toEmail} (Gün ${dayNumber})`);
+    log.warn('[resend] API key yok, email atlanıyor');
     return null;
   }
 
-  const emailContent = getEmailContent(firstName, dayNumber);
+  const subjects = {
+    0: `${firstName}, AI Factory'ye hoş geldin! 🚀`,
+    1: 'Gün 1: Başlamak için ilk adımını at!',
+    2: 'Gün 2: Başarı hikayeleri',
+    3: 'Gün 3: Platformu keşfet',
+    4: 'Gün 4: Yıllık üyelik fırsatı',
+    5: 'Gün 5: Etkinlik takvimi',
+    6: 'Gün 6: Affiliate programı'
+  };
+
+  const subject = subjects[dayIndex] || `AI Factory Onboarding — Gün ${dayIndex}`;
 
   try {
     const response = await fetch('https://api.resend.com/emails', {
@@ -24,63 +34,25 @@ async function sendOnboardingEmail(toEmail, firstName, dayNumber) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        from: `AI Factory <${config.resendFromEmail}>`,
+        from: config.resendFromEmail,
         to: [toEmail],
-        subject: emailContent.subject,
-        html: emailContent.html
+        subject: subject,
+        html: `<p>Merhaba ${firstName},</p><p>AI Factory onboarding içeriğin hazır. 🎉</p><p>Detaylar için topluluğumuza göz at: <a href="https://skool.com/ai-factory">AI Factory</a></p>`
       })
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Resend HTTP ${response.status}: ${error}`);
+      const errorText = await response.text();
+      throw new Error(`Resend API hatası ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
-    log.info(`[resend] Email gönderildi: ${toEmail} — Gün ${dayNumber} (${data.id})`);
+    log.info(`[resend] Email gönderildi: ${toEmail} (Gün ${dayIndex}) — ID: ${data.id}`);
     return data;
-
   } catch (error) {
-    log.error(`[resend] Email hatası: ${error.message}`, error.stack);
+    log.error(`[resend] Email gönderme hatası: ${error.message}`, error);
     throw error;
   }
 }
 
-function getEmailContent(firstName, dayNumber) {
-  const SKOOL_URL = "https://skool.com/yapay-zeka-factory/classroom";
-
-  const contents = {
-    0: {
-      subject: "AI Factory'ye hoş geldin! 🚀",
-      html: `<p>Merhaba ${firstName},</p><p>AI Factory topluluğuna hoş geldin! İlk tanıtım videomuzu izlemek için <a href="${SKOOL_URL}">buraya tıkla</a>.</p><p>Bundan sonra 7 gün boyunca sana kısa videolarla topluluğu tanıtacağım.</p>`
-    },
-    1: {
-      subject: "Adım 1: Topluluğu favorilere ekle",
-      html: `<p>Selam ${firstName},</p><p>Bugünkü videon hazır! <a href="${SKOOL_URL}">Buradan izle</a>.</p><p>Tarayıcına ekle ve mobil uygulamayı indir — böylece hiçbir şeyi kaçırmazsın.</p>`
-    },
-    2: {
-      subject: "Üyelerimiz neler başardı?",
-      html: `<p>Selam ${firstName},</p><p>Bugün sana topluluğumuzdaki gerçek başarı hikayelerini göstereceğim. <a href="${SKOOL_URL}">Videoyu izle</a>.</p>`
-    },
-    3: {
-      subject: "Platform turu: Her şey burada",
-      html: `<p>Selam ${firstName},</p><p>Bugünkü videoda platformun tüm bölümlerini keşfedeceksin. <a href="${SKOOL_URL}">Buradan izle</a>.</p>`
-    },
-    4: {
-      subject: "Yıllık üyeliğin avantajları",
-      html: `<p>Selam ${firstName},</p><p>Bugün seninle yıllık üyelik ve JoinSecret'i paylaşıyorum. <a href="${SKOOL_URL}">Detaylar videoda</a>.</p>`
-    },
-    5: {
-      subject: "Canlı yayınlar ve etkinlikler",
-      html: `<p>Selam ${firstName},</p><p>Takvimimizdeki etkinlikleri keşfet! <a href="${SKOOL_URL}">Videoyu izle</a>.</p>`
-    },
-    6: {
-      subject: "Davet et ve kazan! 🎉",
-      html: `<p>Selam ${firstName},</p><p>Son videomuz! Affiliate programımızla arkadaşlarını davet ederek kazanabilirsin. <a href="${SKOOL_URL}">Nasıl yapacağını öğren</a>.</p><p>Bundan sonra toplulukta, canlı yayınlarda ve eğitimlerde görüşürüz. Başarılar!</p>`
-    }
-  };
-
-  return contents[dayNumber] || contents[0];
-}
-
-module.exports = { sendOnboardingEmail, getEmailContent };
+module.exports = { sendOnboardingEmail };
