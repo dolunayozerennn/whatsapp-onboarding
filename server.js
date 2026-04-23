@@ -26,9 +26,9 @@ const { validatePhone } = require('./services/phoneValidator');
 const resend = require('./services/resend');
 const log = require('./utils/logger');
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 // POST /webhook/new-paid-member — Zapier Zap #1
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 app.post('/webhook/new-paid-member', async (req, res) => {
   try {
     const { transaction_id, first_name, last_name, email, date } = req.body;
@@ -68,9 +68,9 @@ app.post('/webhook/new-paid-member', async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 // POST /webhook/membership-questions — Zapier Zap #2
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 app.post('/webhook/membership-questions', async (req, res) => {
   try {
     const { transaction_id, first_name, last_name, answer_1 } = req.body;
@@ -168,9 +168,58 @@ app.post('/webhook/membership-questions', async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// POST /webhook/wa-failed — ManyChat Fallback
+// ─────────────────────────────────────────────────────────────────
+app.post('/webhook/wa-failed', async (req, res) => {
+  try {
+    const { phone, reason } = req.body;
+
+    log.info(`[wa-failed] Gelen veri: ${JSON.stringify(req.body)}`);
+
+    if (!phone) {
+      log.warn('[wa-failed] phone eksik, atlanıyor');
+      return res.status(400).json({ error: 'phone zorunlu' });
+    }
+
+    const member = await notion.findByPhone(phone);
+    if (!member) {
+      log.warn(`[wa-failed] Notion'da kullanıcı bulunamadı: ${phone}`);
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    }
+
+    const currentNotes = member.notes ? `${member.notes}\n` : '';
+    const newNote = `${currentNotes}[WA-FAILED] Sebep: ${reason || 'Bilinmiyor'} — Email'e yönlendirildi.`;
+
+    await notion.updatePage(member.id, {
+      onboardingStatus: "email",
+      onboardingChannel: "email",
+      notes: newNote
+    });
+
+    log.info(`[wa-failed] Notion güncellendi, email kanalına alındı: ${member.firstName} (${phone})`);
+
+    if (member.email) {
+      try {
+        await resend.sendOnboardingEmail(member.email, member.firstName, member.onboardingStep || 0);
+        log.info(`[wa-failed] Email fallback tetiklendi: ${member.email}`);
+      } catch (emailErr) {
+        log.error(`[wa-failed] Email gönderme hatası: ${emailErr.message}`, emailErr.stack);
+      }
+    } else {
+      log.warn(`[wa-failed] Kullanıcının emaili yok, email atılamadı: ${member.firstName}`);
+    }
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    log.error(`[wa-failed] HATA: ${error.message}`, error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
 // GET /health — Monitoring & Watchdog
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
   try {
     const members = await notion.getActiveOnboardingMembers();
@@ -191,14 +240,14 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 // Cron job'ları başlat
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 require('./cron');
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 // Server başlat
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 const PORT = config.port;
 app.listen(PORT, '0.0.0.0', () => {
   log.info(`WhatsApp Onboarding server başlatıldı: 0.0.0.0:${PORT}`);
