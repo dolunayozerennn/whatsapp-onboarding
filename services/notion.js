@@ -77,6 +77,8 @@ async function updatePage(pageId, updates) {
   if (updates.onboardingStep !== undefined) properties["Onboarding Adımı"] = { number: updates.onboardingStep };
   if (updates.onboardingStartDate) properties["Onboarding Başlangıcı"] = { date: { start: updates.onboardingStartDate } };
   if (updates.notes) properties["Notlar"] = { rich_text: [{ text: { content: updates.notes } }] };
+  if (updates.errorCount !== undefined) properties["errorCount"] = { number: updates.errorCount };
+  if (updates.lastError !== undefined) properties["lastError"] = { rich_text: [{ text: { content: updates.lastError } }] };
 
   await notion.pages.update({ page_id: pageId, properties });
 }
@@ -142,6 +144,8 @@ function parseMember(page) {
     onboardingStep: page.properties["Onboarding Adımı"]?.number || 0,
     onboardingStartDate: page.properties["Onboarding Başlangıcı"]?.date?.start || '',
     onboardingChannel: page.properties["Onboarding Kanalı"]?.select?.name || '',
+    errorCount: page.properties["errorCount"]?.number || 0,
+    lastError: page.properties["lastError"]?.rich_text?.[0]?.text?.content || '',
   };
 }
 

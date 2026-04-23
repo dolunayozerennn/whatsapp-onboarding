@@ -11,9 +11,9 @@ function formatTimestamp() {
 }
 
 function formatMessage(level, msg, meta = null) {
-  let output = `[${formatTimestamp()}] ${level}: ${msg}`;
+  let output = \`[\${formatTimestamp()}] \${level}: \${msg}\`;
   if (meta) {
-    output += `\n  ↳ META: ${JSON.stringify(meta)}`;
+    output += \`\n  ↳ META: \${JSON.stringify(meta)}\`;
   }
   return output;
 }

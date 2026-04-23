@@ -8,6 +8,7 @@
 // ============================================================
 
 const cron = require('node-cron');
+const moment = require('moment-timezone');
 const { ONBOARDING_FLOWS } = require('./config/templates');
 const { config } = require('./config/env');
 const notion = require('./services/notion');
@@ -31,15 +32,14 @@ cron.schedule(config.cronSchedule, async () => {
 
     for (const member of members) {
       try {
-        const startDate = new Date(member.onboardingStartDate);
-        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
-        const startStr = startDate.toISOString().split('T')[0];
-        const daysDiff = Math.floor((new Date(todayStr) - new Date(startStr)) / (1000 * 60 * 60 * 24));
+        const today = moment.tz('Europe/Istanbul').startOf('day');
+        const startDay = moment.tz(member.onboardingStartDate, 'YYYY-MM-DD', 'Europe/Istanbul').startOf('day');
+        const daysDiff = today.diff(startDay, 'days');
 
-        const expectedDay = daysDiff;
+        const expectedDay = member.onboardingStep + 1;
 
-        // Zaten bugünün mesajı gönderildiyse atla
-        if (member.onboardingStep >= expectedDay) {
+        // Zamanı gelmediyse atla
+        if (daysDiff <= member.onboardingStep) {
           skipped++;
           continue;
         }
@@ -68,7 +68,11 @@ cron.schedule(config.cronSchedule, async () => {
         );
 
         // Notion güncelle
-        await notion.updatePage(member.id, { onboardingStep: expectedDay });
+        await notion.updatePage(member.id, { 
+          onboardingStep: expectedDay,
+          errorCount: 0,
+          lastError: ""
+        });
 
         log.info(`Gün ${expectedDay} gönderildi: ${member.firstName} (${member.phone})`);
         sent++;
@@ -78,6 +82,23 @@ cron.schedule(config.cronSchedule, async () => {
 
       } catch (memberError) {
         log.error(`Üye hatası (${member.firstName}): ${memberError.message}`, memberError.stack);
+        
+        // Dead-Letter Queue (DLQ)
+        const newErrorCount = (member.errorCount || 0) + 1;
+        if (newErrorCount >= 3) {
+          await notion.updatePage(member.id, { 
+            errorCount: newErrorCount, 
+            lastError: memberError.message,
+            onboardingStatus: "error"
+          });
+          log.info(`Üye error statüsüne alındı (DLQ): ${member.firstName} (${member.phone})`);
+        } else {
+          await notion.updatePage(member.id, { 
+            errorCount: newErrorCount, 
+            lastError: memberError.message 
+          });
+        }
+        
         errors++;
         continue;
       }
@@ -90,26 +111,48 @@ cron.schedule(config.cronSchedule, async () => {
         const emailMembers = await notion.getActiveEmailMembers();
         for (const member of emailMembers) {
           try {
-            const startDate = new Date(member.onboardingStartDate);
-            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
-            const startStr = startDate.toISOString().split('T')[0];
-            const daysDiff = Math.floor((new Date(todayStr) - new Date(startStr)) / (1000 * 60 * 60 * 24));
+            const today = moment.tz('Europe/Istanbul').startOf('day');
+            const startDay = moment.tz(member.onboardingStartDate, 'YYYY-MM-DD', 'Europe/Istanbul').startOf('day');
+            const daysDiff = today.diff(startDay, 'days');
 
-            if (member.onboardingStep >= daysDiff) continue;
+            if (daysDiff <= member.onboardingStep) continue;
 
-            if (daysDiff > 6) {
+            const expectedDay = member.onboardingStep + 1;
+
+            if (expectedDay > 6) {
               await notion.updatePage(member.id, { onboardingStatus: "tamamlandı" });
               completed++;
               continue;
             }
 
-            await resend.sendOnboardingEmail(member.email, member.firstName, daysDiff);
-            await notion.updatePage(member.id, { onboardingStep: daysDiff });
+            await resend.sendOnboardingEmail(member.email, member.firstName, expectedDay);
+            await notion.updatePage(member.id, { 
+              onboardingStep: expectedDay,
+              errorCount: 0,
+              lastError: ""
+            });
             emailSent++;
 
             await new Promise(resolve => setTimeout(resolve, 1000));
           } catch (emailErr) {
             log.error(`Email üye hatası (${member.firstName}): ${emailErr.message}`, emailErr.stack);
+            
+            // Dead-Letter Queue (DLQ)
+            const newErrorCount = (member.errorCount || 0) + 1;
+            if (newErrorCount >= 3) {
+              await notion.updatePage(member.id, { 
+                errorCount: newErrorCount, 
+                lastError: emailErr.message,
+                onboardingStatus: "error"
+              });
+              log.info(`Email üye error statüsüne alındı (DLQ): ${member.firstName} (${member.email})`);
+            } else {
+              await notion.updatePage(member.id, { 
+                errorCount: newErrorCount, 
+                lastError: emailErr.message 
+              });
+            }
+            
             errors++;
           }
         }

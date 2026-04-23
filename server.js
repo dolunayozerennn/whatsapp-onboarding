@@ -15,6 +15,7 @@ validateEnv();
 
 const express = require('express');
 const app = express();
+const moment = require('moment-timezone');
 
 app.use(express.json());
 
@@ -54,7 +55,7 @@ app.post('/webhook/new-paid-member', async (req, res) => {
         lastName: last_name || '',
         email: email || '',
         transactionId: transaction_id,
-        registrationDate: date || new Date().toISOString().split('T')[0],
+        registrationDate: date || moment().tz('Europe/Istanbul').format('YYYY-MM-DD'),
         onboardingStatus: "bekliyor"
       });
       log.info(`[new-paid-member] Yeni kayıt: ${first_name} ${last_name} (${email})`);
@@ -105,7 +106,7 @@ app.post('/webhook/membership-questions', async (req, res) => {
       return res.status(200).json({ success: true, skipped: true });
     }
 
-    if (phoneResult.valid) {
+    if (phoneResult.valid && phoneResult.confidence >= 0.5) {
       // 4a. Telefon numarası ile deduplication
       const existingPhone = await notion.findByPhone(phoneResult.normalized);
       if (existingPhone && existingPhone.id !== member.id) {
@@ -123,7 +124,7 @@ app.post('/webhook/membership-questions', async (req, res) => {
         onboardingStatus: "whatsapp",
         onboardingChannel: "whatsapp",
         onboardingStep: 0,
-        onboardingStartDate: new Date().toISOString().split('T')[0]
+        onboardingStartDate: moment().tz('Europe/Istanbul').format('YYYY-MM-DD')
       });
 
       // 6. ManyChat'te subscriber oluştur + Gün 0 flow'unu tetikle
@@ -133,16 +134,19 @@ app.post('/webhook/membership-questions', async (req, res) => {
         ONBOARDING_FLOWS[0].flow_id
       );
 
-      log.info(`[membership-questions] WhatsApp onboarding başlatıldı: ${first_name} → ${phoneResult.normalized}`);
+      log.info(`[membership-questions] WhatsApp onboarding başlatıldı: ${first_name} → ${phoneResult.normalized} (Güven: ${phoneResult.confidence})`);
 
     } else {
-      // 4b. Geçersiz numara → Email fallback
+      // 4b. Geçersiz numara veya Düşük Güven Skoru → Email fallback
+      const failReason = !phoneResult.valid ? phoneResult.reason : "Düşük güven skoru";
+      const confidenceStr = phoneResult.confidence !== undefined ? phoneResult.confidence : 'N/A';
+      
       await notion.updatePage(member.id, {
         onboardingStatus: "email",
         onboardingChannel: "email",
         onboardingStep: 0,
-        onboardingStartDate: new Date().toISOString().split('T')[0],
-        notes: `Telefon cevabı: "${answer_1}" — ${phoneResult.reason}`
+        onboardingStartDate: moment().tz('Europe/Istanbul').format('YYYY-MM-DD'),
+        notes: `Telefon cevabı: "${answer_1}" — Sebep: ${failReason} (Güven: ${confidenceStr})`
       });
 
       // Email onboarding başlat (eğer email varsa)
@@ -196,8 +200,8 @@ require('./cron');
 // Server başlat
 // ─────────────────────────────────────────────────────────────
 const PORT = config.port;
-app.listen(PORT, () => {
-  log.info(`WhatsApp Onboarding server başlatıldı: port ${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  log.info(`WhatsApp Onboarding server başlatıldı: 127.0.0.1:${PORT}`);
   log.info(`Webhook URL'ler:`);
   log.info(`  POST /webhook/new-paid-member`);
   log.info(`  POST /webhook/membership-questions`);
