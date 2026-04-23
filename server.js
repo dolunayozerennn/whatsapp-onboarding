@@ -267,5 +267,6 @@ app.listen(PORT, '0.0.0.0', () => {
   log.info(`Webhook URL'ler:`);
   log.info(`  POST /webhook/new-paid-member`);
   log.info(`  POST /webhook/membership-questions`);
+  log.info(`  POST /webhook/wa-failed`);
   log.info(`  GET  /health`);
 });
