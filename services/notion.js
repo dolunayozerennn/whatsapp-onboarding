@@ -1,8 +1,7 @@
 // ============================================================
-// services/notion.js — Notion CRM Katmanı
+// services/notion.js — Notion CRM CRUD İşlemleri
 // ============================================================
-// Tüm üye CRUD işlemleri bu modül üzerinden yapılır.
-// Database: AI Factory WhatsApp Onboarding
+// Onboarding veritabanı: 0a84f19d-8dd4-4c08-9226-71d9ce71411f
 // ============================================================
 
 const { Client } = require('@notionhq/client');
@@ -12,129 +11,150 @@ const log = require('../utils/logger');
 const notion = new Client({ auth: config.notionApiKey });
 const DATABASE_ID = config.notionDatabaseId;
 
-// ─── Yeni Üye Oluştur ───
-async function createMember({ firstName, lastName, email, transactionId, registrationDate, onboardingStatus }) {
-  try {
-    const properties = {
-      'Name': { title: [{ text: { content: firstName } }] },
-      'Last Name': { rich_text: [{ text: { content: lastName || '' } }] },
-      'Email': { email: email || null },
-      'Transaction ID': { rich_text: [{ text: { content: transactionId || '' } }] },
-      'Onboarding Status': { select: { name: onboardingStatus || 'bekliyor' } }
-    };
+// ─── Notion Database Şeması ───
+// İsim (title), Soyisim (text), Email (email), Telefon (phone_number),
+// Skool ID (number), Kayıt Tarihi (date), Onboarding Durumu (select),
+// Onboarding Kanalı (select), Onboarding Adımı (number),
+// Onboarding Başlangıcı (date), Notlar (text)
 
-    if (registrationDate) {
-      properties['Registration Date'] = { date: { start: registrationDate } };
-    }
-
-    const response = await notion.pages.create({
-      parent: { database_id: DATABASE_ID },
-      properties
-    });
-
-    log.info(`[notion] Üye oluşturuldu: ${firstName} (${response.id})`);
-    return parseNotionPage(response);
-  } catch (error) {
-    log.error(`[notion] createMember hatası: ${error.message}`, error);
-    throw error;
-  }
-}
-
-// ─── Transaction ID ile Ara ───
 async function findByTransactionId(transactionId) {
-  try {
-    const response = await notion.databases.query({
-      database_id: DATABASE_ID,
-      filter: {
-        property: 'Transaction ID',
-        rich_text: { equals: transactionId }
-      }
-    });
-    return response.results.length > 0 ? parseNotionPage(response.results[0]) : null;
-  } catch (error) {
-    log.error(`[notion] findByTransactionId hatası: ${error.message}`, error);
-    throw error;
-  }
+  const id = parseInt(transactionId);
+  if (isNaN(id)) return null;
+
+  const response = await notion.databases.query({
+    database_id: DATABASE_ID,
+    filter: {
+      property: "Skool ID",
+      number: { equals: id }
+    }
+  });
+
+  if (response.results.length === 0) return null;
+  return parseMember(response.results[0]);
 }
 
-// ─── Telefon ile Ara ───
 async function findByPhone(phone) {
-  try {
-    const response = await notion.databases.query({
-      database_id: DATABASE_ID,
-      filter: {
-        property: 'Phone',
-        phone_number: { equals: phone }
-      }
-    });
-    return response.results.length > 0 ? parseNotionPage(response.results[0]) : null;
-  } catch (error) {
-    log.error(`[notion] findByPhone hatası: ${error.message}`, error);
-    throw error;
-  }
+  const response = await notion.databases.query({
+    database_id: DATABASE_ID,
+    filter: {
+      property: "Telefon",
+      phone_number: { equals: phone }
+    }
+  });
+
+  if (response.results.length === 0) return null;
+  return parseMember(response.results[0]);
 }
 
-// ─── Sayfa Güncelle ───
-async function updatePage(pageId, data) {
-  try {
-    const properties = {};
+async function createMember({ firstName, lastName, email, transactionId, registrationDate, onboardingStatus }) {
+  const properties = {
+    "İsim": { title: [{ text: { content: firstName } }] },
+    "Onboarding Durumu": { select: { name: onboardingStatus || "bekliyor" } }
+  };
 
-    if (data.phone !== undefined) properties['Phone'] = { phone_number: data.phone };
-    if (data.email !== undefined) properties['Email'] = { email: data.email };
-    if (data.lastName !== undefined) properties['Last Name'] = { rich_text: [{ text: { content: data.lastName } }] };
-    if (data.onboardingStatus !== undefined) properties['Onboarding Status'] = { select: { name: data.onboardingStatus } };
-    if (data.onboardingChannel !== undefined) properties['Onboarding Channel'] = { select: { name: data.onboardingChannel } };
-    if (data.onboardingStep !== undefined) properties['Onboarding Step'] = { number: data.onboardingStep };
-    if (data.notes !== undefined) properties['Notes'] = { rich_text: [{ text: { content: data.notes } }] };
-    if (data.onboardingStartDate !== undefined) properties['Onboarding Start Date'] = { date: { start: data.onboardingStartDate } };
+  if (lastName) properties["Soyisim"] = { rich_text: [{ text: { content: lastName } }] };
+  if (email) properties["Email"] = { email: email };
+  if (transactionId) properties["Skool ID"] = { number: parseInt(transactionId) };
+  if (registrationDate) properties["Kayıt Tarihi"] = { date: { start: registrationDate } };
 
-    await notion.pages.update({ page_id: pageId, properties });
-    log.info(`[notion] Sayfa güncellendi: ${pageId}`);
-  } catch (error) {
-    log.error(`[notion] updatePage hatası: ${error.message}`, error);
-    throw error;
-  }
+  const page = await notion.pages.create({
+    parent: { database_id: DATABASE_ID },
+    properties
+  });
+
+  log.info(`[notion] Yeni üye oluşturuldu: ${firstName} (${page.id})`);
+  return parseMember(page);
 }
 
-// ─── Aktif Onboarding Üyelerini Getir ───
+async function updatePage(pageId, updates) {
+  const properties = {};
+
+  if (updates.email !== undefined) properties["Email"] = { email: updates.email };
+  if (updates.lastName !== undefined) properties["Soyisim"] = { rich_text: [{ text: { content: updates.lastName } }] };
+  if (updates.phone) properties["Telefon"] = { phone_number: updates.phone };
+  if (updates.onboardingStatus) properties["Onboarding Durumu"] = { select: { name: updates.onboardingStatus } };
+  if (updates.onboardingChannel) properties["Onboarding Kanalı"] = { select: { name: updates.onboardingChannel } };
+  if (updates.onboardingStep !== undefined) properties["Onboarding Adımı"] = { number: updates.onboardingStep };
+  if (updates.onboardingStartDate) properties["Onboarding Başlangıcı"] = { date: { start: updates.onboardingStartDate } };
+  if (updates.notes) properties["Notlar"] = { rich_text: [{ text: { content: updates.notes } }] };
+  if (updates.errorCount !== undefined) properties["errorCount"] = { number: updates.errorCount };
+  if (updates.lastError !== undefined) properties["lastError"] = { rich_text: [{ text: { content: updates.lastError } }] };
+
+  await notion.pages.update({ page_id: pageId, properties });
+}
+
 async function getActiveOnboardingMembers() {
-  try {
+  const allMembers = [];
+  let hasMore = true;
+  let startCursor = undefined;
+
+  while (hasMore) {
     const response = await notion.databases.query({
       database_id: DATABASE_ID,
       filter: {
-        property: 'Onboarding Status',
-        select: { equals: 'whatsapp' }
-      }
+        and: [
+          { property: "Onboarding Durumu", select: { equals: "whatsapp" } },
+          { property: "Telefon", phone_number: { is_not_empty: true } }
+        ]
+      },
+      start_cursor: startCursor
     });
-    return response.results.map(parseNotionPage);
-  } catch (error) {
-    log.error(`[notion] getActiveOnboardingMembers hatası: ${error.message}`, error);
-    throw error;
+
+    allMembers.push(...response.results.map(parseMember));
+    hasMore = response.has_more;
+    startCursor = response.next_cursor;
   }
+
+  return allMembers;
 }
 
-// ─── Notion Page Parser ───
-function parseNotionPage(page) {
-  const props = page.properties;
+async function getActiveEmailMembers() {
+  const allMembers = [];
+  let hasMore = true;
+  let startCursor = undefined;
+
+  while (hasMore) {
+    const response = await notion.databases.query({
+      database_id: DATABASE_ID,
+      filter: {
+        and: [
+          { property: "Onboarding Durumu", select: { equals: "email" } },
+          { property: "Email", email: { is_not_empty: true } }
+        ]
+      },
+      start_cursor: startCursor
+    });
+
+    allMembers.push(...response.results.map(parseMember));
+    hasMore = response.has_more;
+    startCursor = response.next_cursor;
+  }
+
+  return allMembers;
+}
+
+function parseMember(page) {
   return {
     id: page.id,
-    firstName: props['Name']?.title?.[0]?.text?.content || '',
-    lastName: props['Last Name']?.rich_text?.[0]?.text?.content || '',
-    email: props['Email']?.email || null,
-    phone: props['Phone']?.phone_number || null,
-    transactionId: props['Transaction ID']?.rich_text?.[0]?.text?.content || '',
-    onboardingStatus: props['Onboarding Status']?.select?.name || 'bekliyor',
-    onboardingChannel: props['Onboarding Channel']?.select?.name || null,
-    onboardingStep: props['Onboarding Step']?.number ?? 0,
-    notes: props['Notes']?.rich_text?.[0]?.text?.content || '',
-    onboardingStartDate: props['Onboarding Start Date']?.date?.start || null
+    firstName: page.properties["İsim"]?.title?.[0]?.text?.content || '',
+    lastName: page.properties["Soyisim"]?.rich_text?.[0]?.text?.content || '',
+    email: page.properties["Email"]?.email || '',
+    phone: page.properties["Telefon"]?.phone_number || '',
+    onboardingStatus: page.properties["Onboarding Durumu"]?.select?.name || '',
+    onboardingStep: page.properties["Onboarding Adımı"]?.number || 0,
+    onboardingStartDate: page.properties["Onboarding Başlangıcı"]?.date?.start || '',
+    onboardingChannel: page.properties["Onboarding Kanalı"]?.select?.name || '',
+    errorCount: page.properties["errorCount"]?.number || 0,
+    lastError: page.properties["lastError"]?.rich_text?.[0]?.text?.content || '',
+    notes: page.properties["Notlar"]?.rich_text?.[0]?.text?.content || '',
   };
 }
 
 module.exports = {
-  createMember,
   findByTransactionId,
   findByPhone,
+  createMember,
   updatePage,
-  getActiveOnboardingMembers
+  getActiveOnboardingMembers,
+  getActiveEmailMembers
 };
