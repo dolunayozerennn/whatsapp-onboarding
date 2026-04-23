@@ -119,12 +119,19 @@ app.post('/webhook/membership-questions', async (req, res) => {
       }
 
       // 5. Notion'ı güncelle
+      // Gece 00:00-06:00 arası kayıt → startDate'i 1 gün geri al
+      // Böylece öğlen cron'u daysDiff=1 hesaplar ve Day 1 aynı gün gider
+      const nowWa = moment().tz('Europe/Istanbul');
+      const startDateWa = nowWa.hour() < 6
+        ? nowWa.clone().subtract(1, 'day').format('YYYY-MM-DD')
+        : nowWa.format('YYYY-MM-DD');
+
       await notion.updatePage(member.id, {
         phone: phoneResult.normalized,
         onboardingStatus: "whatsapp",
         onboardingChannel: "whatsapp",
         onboardingStep: 0,
-        onboardingStartDate: moment().tz('Europe/Istanbul').format('YYYY-MM-DD')
+        onboardingStartDate: startDateWa
       });
 
       // 6. ManyChat'te subscriber oluştur + Gün 0 flow'unu tetikle
@@ -141,11 +148,17 @@ app.post('/webhook/membership-questions', async (req, res) => {
       const failReason = !phoneResult.valid ? phoneResult.reason : "Düşük güven skoru";
       const confidenceStr = phoneResult.confidence !== undefined ? phoneResult.confidence : 'N/A';
       
+      // Gece 00:00-06:00 arası kayıt → startDate'i 1 gün geri al
+      const nowEmail = moment().tz('Europe/Istanbul');
+      const startDateEmail = nowEmail.hour() < 6
+        ? nowEmail.clone().subtract(1, 'day').format('YYYY-MM-DD')
+        : nowEmail.format('YYYY-MM-DD');
+
       await notion.updatePage(member.id, {
         onboardingStatus: "email",
         onboardingChannel: "email",
         onboardingStep: 0,
-        onboardingStartDate: moment().tz('Europe/Istanbul').format('YYYY-MM-DD'),
+        onboardingStartDate: startDateEmail,
         notes: `Telefon cevabı: "${answer_1}" — Sebep: ${failReason} (Güven: ${confidenceStr})`
       });
 
