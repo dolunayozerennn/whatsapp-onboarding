@@ -101,7 +101,8 @@ app.post('/webhook/membership-questions', async (req, res) => {
     }
 
     // 3. Deduplication kontrolü
-    if (member.onboardingStatus === 'whatsapp' || member.onboardingStatus === 'tamamlandı') {
+    const skipStatuses = ['whatsapp', 'email', 'tamamlandı', 'error'];
+    if (skipStatuses.includes(member.onboardingStatus)) {
       log.info(`[membership-questions] Zaten onboarding'de veya tamamlanmış, atlanıyor: ${transaction_id}`);
       return res.status(200).json({ success: true, skipped: true });
     }
@@ -125,7 +126,6 @@ app.post('/webhook/membership-questions', async (req, res) => {
       const startDateWa = nowWa.hour() < 6
         ? nowWa.clone().subtract(1, 'day').format('YYYY-MM-DD')
         : nowWa.format('YYYY-MM-DD');
-
       await notion.updatePage(member.id, {
         phone: phoneResult.normalized,
         onboardingStatus: "whatsapp",
@@ -153,7 +153,6 @@ app.post('/webhook/membership-questions', async (req, res) => {
       const startDateEmail = nowEmail.hour() < 6
         ? nowEmail.clone().subtract(1, 'day').format('YYYY-MM-DD')
         : nowEmail.format('YYYY-MM-DD');
-
       await notion.updatePage(member.id, {
         onboardingStatus: "email",
         onboardingChannel: "email",
