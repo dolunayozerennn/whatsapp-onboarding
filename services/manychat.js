@@ -14,11 +14,76 @@ const headers = {
   'Content-Type': 'application/json'
 };
 
+let customFieldsCache = null;
+let customFieldsFetchPromise = null; // Fix: Cache stampede önleme
+
+// Fix: fetchWithRetry — 8s timeout + 1 retry
+async function fetchWithRetry(url, options, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(8000)
+      });
+      return response;
+    } catch (err) {
+      if (attempt < retries && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        log.warn(`[manychat:retry] Timeout, tekrar deneniyor... (${attempt + 1}/${retries})`);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+// Fix: Telefon numarası normalizasyonu
+function normalizePhone(phone) {
+  if (!phone) return phone;
+  let cleaned = phone.replace(/[\s\-()]/g, '');
+  if (!cleaned.startsWith('+')) cleaned = '+' + cleaned;
+  return cleaned;
+}
+
+async function getCustomFieldId(fieldName) {
+  if (customFieldsCache && customFieldsCache[fieldName]) {
+    return customFieldsCache[fieldName];
+  }
+
+  // Fix: Cache stampede — aynı anda birden fazla çağrıyı engelle
+  if (customFieldsFetchPromise) {
+    await customFieldsFetchPromise;
+    return customFieldsCache?.[fieldName] || null;
+  }
+
+  try {
+    customFieldsFetchPromise = fetchWithRetry(`${API_URL}/subscriber/getCustomFields`, {
+      method: 'GET',
+      headers
+    });
+    const response = await customFieldsFetchPromise;
+    const data = await response.json();
+    if (data.status === 'success' && data.data) {
+      customFieldsCache = {};
+      for (const field of data.data) {
+        customFieldsCache[field.name] = field.id;
+      }
+      return customFieldsCache[fieldName] || null;
+    }
+  } catch (error) {
+    log.error(`[manychat:api] getCustomFields hatası: ${error.message}`, error);
+  } finally {
+    customFieldsFetchPromise = null;
+  }
+  return null;
+}
+
 /**
  * Ana fonksiyon: subscriber yoksa oluştur, custom field'ları set et, flow'u tetikle
  */
 async function ensureSubscriberAndSendFlow(phoneNumber, firstName, flowId) {
   let subscriberId;
+  // Fix: Telefon numarasını normalize et
+  phoneNumber = normalizePhone(phoneNumber);
   const context = { phoneNumber, firstName, flowId };
   
   log.info(`[manychat:engine] Flow tetikleme işlemi başlatıldı.`, context);
@@ -78,7 +143,7 @@ async function createSubscriber(phoneNumber, firstName) {
     
     log.debug(`[manychat:api] createSubscriber isteği atılıyor.`, payload);
     
-    const response = await fetch(`${API_URL}/subscriber/createSubscriber`, {
+    const response = await fetchWithRetry(`${API_URL}/subscriber/createSubscriber`, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload)
@@ -92,9 +157,16 @@ async function createSubscriber(phoneNumber, firstName) {
       return data.data.id;
     }
 
-    // Subscriber zaten varsa hata döner — normal, findByCustomField ile bul
+    // Fix: Subscriber conflict — zaten varsa bul
     log.warn(`[manychat:api] ⚠️ createSubscriber başarısız (büyük ihtimalle mevcut).`, { message: data.message });
-    return await findSubscriberByPhone(phoneNumber);
+    let existingId = await findSubscriberByPhone(phoneNumber);
+    if (!existingId) {
+      existingId = await findSubscriberBySystemPhone(phoneNumber);
+    }
+    if (existingId) {
+      log.info(`[manychat:api] Conflict sonrası mevcut subscriber bulundu.`, { existingId });
+    }
+    return existingId;
 
   } catch (error) {
     log.error(`[manychat:api] ❌ createSubscriber ağ hatası: ${error.message}`, error);
@@ -104,17 +176,19 @@ async function createSubscriber(phoneNumber, firstName) {
 
 async function findSubscriberByPhone(phoneNumber) {
   try {
-    const payload = {
-      field_name: "whatsapp_phone_text",
-      field_value: phoneNumber
-    };
+    const fieldId = await getCustomFieldId('whatsapp_phone_text');
+    if (!fieldId) {
+      log.warn(`[manychat:api] whatsapp_phone_text custom field ID alınamadı.`);
+      return null;
+    }
+
+    const url = `${API_URL}/subscriber/findByCustomField?field_id=${fieldId}&field_value=${encodeURIComponent(phoneNumber)}`;
     
-    log.debug(`[manychat:api] findByCustomField isteği atılıyor.`, payload);
+    log.debug(`[manychat:api] findByCustomField isteği atılıyor.`, { url });
     
-    const response = await fetch(`${API_URL}/subscriber/findByCustomField`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload)
+    const response = await fetchWithRetry(url, {
+      method: 'GET',
+      headers
     });
 
     const data = await response.json();
@@ -140,7 +214,7 @@ async function findSubscriberBySystemPhone(phoneNumber) {
     const url = `${API_URL}/subscriber/findBySystemField?phone=${encodeURIComponent(phoneNumber)}`;
     log.debug(`[manychat:api] findBySystemField (phone) isteği atılıyor.`, { url });
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       method: 'GET',
       headers
     });
@@ -148,9 +222,20 @@ async function findSubscriberBySystemPhone(phoneNumber) {
     const data = await response.json();
     log.debug(`[manychat:api] findBySystemField (phone) yanıtı.`, data);
 
+    // data.data can be an array if search results are returned, or an object if it's a direct match.
+    // Also, if it's an empty array `[]`, it shouldn't be treated as a successful find.
+    let foundId = null;
     if (data.status === 'success' && data.data) {
-      log.info(`[manychat:api] ✅ Subscriber system field üzerinden bulundu.`, { id: data.data.id });
-      return data.data.id;
+      if (Array.isArray(data.data) && data.data.length > 0) {
+        foundId = data.data[0].id;
+      } else if (!Array.isArray(data.data) && data.data.id) {
+        foundId = data.data.id;
+      }
+    }
+
+    if (foundId) {
+      log.info(`[manychat:api] ✅ Subscriber system field üzerinden bulundu.`, { id: foundId });
+      return foundId;
     }
 
     log.info(`[manychat:api] ℹ️ Subscriber system field ile bulunamadı.`);
@@ -162,10 +247,22 @@ async function findSubscriberBySystemPhone(phoneNumber) {
 }
 
 async function setCustomFields(subscriberId, fields) {
-  const fieldArray = Object.entries(fields).map(([name, value]) => ({
-    field_name: name,
-    field_value: String(value)
-  }));
+  const fieldArray = [];
+  for (const [name, value] of Object.entries(fields)) {
+    const fieldId = await getCustomFieldId(name);
+    if (fieldId) {
+      fieldArray.push({
+        field_id: fieldId,
+        field_value: String(value)
+      });
+    } else {
+      // Fallback: If ID not found, try sending with field_name
+      fieldArray.push({
+        field_name: name,
+        field_value: String(value)
+      });
+    }
+  }
 
   const payload = {
     subscriber_id: subscriberId,
@@ -174,7 +271,7 @@ async function setCustomFields(subscriberId, fields) {
 
   log.debug(`[manychat:api] setCustomFields isteği atılıyor.`, payload);
 
-  const response = await fetch(`${API_URL}/subscriber/setCustomFields`, {
+  const response = await fetchWithRetry(`${API_URL}/subscriber/setCustomFields`, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload)
@@ -198,7 +295,7 @@ async function sendFlow(subscriberId, flowId) {
   
   log.debug(`[manychat:api] sendFlow isteği atılıyor.`, payload);
 
-  const response = await fetch(`${API_URL}/sending/sendFlow`, {
+  const response = await fetchWithRetry(`${API_URL}/sending/sendFlow`, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload)
