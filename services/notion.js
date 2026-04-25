@@ -45,6 +45,54 @@ async function findByPhone(phone) {
   return parseMember(response.results[0]);
 }
 
+async function findByEmail(email) {
+  if (!email) return null;
+  
+  const response = await notion.databases.query({
+    database_id: DATABASE_ID,
+    filter: {
+      property: "Email",
+      email: { equals: email }
+    }
+  });
+
+  if (response.results.length === 0) return null;
+  return parseMember(response.results[0]);
+}
+
+async function findByName(firstName, lastName) {
+  if (!firstName) return null;
+  
+  const filter = {
+    and: [
+      {
+        property: "İsim",
+        title: { equals: firstName }
+      }
+    ]
+  };
+
+  if (lastName && lastName !== "No data" && lastName.trim() !== "") {
+    filter.and.push({
+      property: "Soyisim",
+      rich_text: { equals: lastName }
+    });
+  } else {
+    filter.and.push({
+      property: "Soyisim",
+      rich_text: { is_empty: true }
+    });
+  }
+
+  const response = await notion.databases.query({
+    database_id: DATABASE_ID,
+    filter: filter
+  });
+
+  if (response.results.length === 0) return null;
+  return parseMember(response.results[0]);
+}
+
 async function createMember({ firstName, lastName, email, transactionId, registrationDate, onboardingStatus }) {
   const properties = {
     "İsim": { title: [{ text: { content: firstName } }] },
@@ -152,6 +200,8 @@ function parseMember(page) {
 module.exports = {
   findByTransactionId,
   findByPhone,
+  findByEmail,
+  findByName,
   createMember,
   updatePage,
   getActiveOnboardingMembers,
