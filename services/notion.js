@@ -197,6 +197,24 @@ function parseMember(page) {
   };
 }
 
+// ─── NOT EKLEME HELPER ────────────────────────────────────────
+// Mevcut notları silmeden yeni not ekler. Notion rich_text 2000 karakter limiti.
+async function appendNote(pageId, newNote) {
+  try {
+    const page = await notion.pages.retrieve({ page_id: pageId });
+    const existing = page.properties["Notlar"]?.rich_text?.[0]?.text?.content || '';
+    const timestamp = new Date().toISOString().split('T')[0];
+    const entry = `[${timestamp}] ${newNote}`;
+    const combined = existing ? `${existing}\n${entry}` : entry;
+    const trimmed = combined.slice(-2000); // Son 2000 karakter (en güncel notlar)
+    
+    await updatePage(pageId, { notes: trimmed });
+    log.info(`[notion] Not eklendi: ${pageId} → ${entry.slice(0, 80)}...`);
+  } catch (error) {
+    log.error(`[notion] appendNote hatası (${pageId}): ${error.message}`);
+  }
+}
+
 module.exports = {
   findByTransactionId,
   findByPhone,
@@ -205,5 +223,6 @@ module.exports = {
   createMember,
   updatePage,
   getActiveOnboardingMembers,
-  getActiveEmailMembers
+  getActiveEmailMembers,
+  appendNote
 };
