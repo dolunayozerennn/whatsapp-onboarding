@@ -13,19 +13,18 @@ const DATABASE_ID = config.notionDatabaseId;
 
 // ─── Notion Database Şeması ───
 // İsim (title), Soyisim (text), Email (email), Telefon (phone_number),
-// Skool ID (number), Kayıt Tarihi (date), Onboarding Durumu (select),
+// Skool ID (rich_text), Kayıt Tarihi (date), Onboarding Durumu (select),
 // Onboarding Kanalı (select), Onboarding Adımı (number),
 // Onboarding Başlangıcı (date), Notlar (text)
 
 async function findByTransactionId(transactionId) {
-  const id = parseInt(transactionId);
-  if (isNaN(id)) return null;
+  if (!transactionId) return null;
 
   const response = await notion.databases.query({
     database_id: DATABASE_ID,
     filter: {
       property: "Skool ID",
-      number: { equals: id }
+      rich_text: { equals: String(transactionId) }
     }
   });
 
@@ -54,7 +53,7 @@ async function createMember({ firstName, lastName, email, transactionId, registr
 
   if (lastName) properties["Soyisim"] = { rich_text: [{ text: { content: lastName } }] };
   if (email) properties["Email"] = { email: email };
-  if (transactionId) properties["Skool ID"] = { number: parseInt(transactionId) };
+  if (transactionId) properties["Skool ID"] = { rich_text: [{ text: { content: String(transactionId) } }] };
   if (registrationDate) properties["Kayıt Tarihi"] = { date: { start: registrationDate } };
 
   const page = await notion.pages.create({
