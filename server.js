@@ -29,9 +29,40 @@ const resend = require('./services/resend');
 const log = require('./utils/logger');
 
 // ─────────────────────────────────────────────────────────────
+// Security Middleware — Webhook & Admin Auth
+// ─────────────────────────────────────────────────────────────
+function webhookAuth(req, res, next) {
+  if (!config.webhookSecret) {
+    log.warn('[security] WEBHOOK_SECRET tanımlı değil — auth atlanıyor');
+    return next();
+  }
+  const authHeader = req.headers['authorization'] || req.headers['x-webhook-secret'] || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (token !== config.webhookSecret) {
+    log.warn(`[security] Webhook auth başarısız — IP: ${req.ip}`);
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+function adminAuth(req, res, next) {
+  if (!config.adminSecret) {
+    log.warn('[security] ADMIN_SECRET tanımlı değil — auth atlanıyor');
+    return next();
+  }
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (token !== config.adminSecret) {
+    log.warn(`[security] Admin auth başarısız — IP: ${req.ip}`);
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+// ─────────────────────────────────────────────────────────────
 // POST /webhook/new-paid-member — Zapier Zap #1
 // ─────────────────────────────────────────────────────────────
-app.post('/webhook/new-paid-member', async (req, res) => {
+app.post('/webhook/new-paid-member', webhookAuth, async (req, res) => {
   try {
     const { transaction_id, first_name, last_name, email, date } = req.body;
 
@@ -73,7 +104,7 @@ app.post('/webhook/new-paid-member', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // POST /webhook/membership-questions — Zapier Zap #2
 // ─────────────────────────────────────────────────────────────
-app.post('/webhook/membership-questions', async (req, res) => {
+app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
   try {
     const { transaction_id, first_name, last_name, answer_1, email } = req.body;
 
@@ -207,7 +238,7 @@ app.post('/webhook/membership-questions', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // POST /webhook/wa-optin — ManyChat WhatsApp Opt-in (Hibrit Fallback)
 // ─────────────────────────────────────────────────────────────
-app.post('/webhook/wa-optin', async (req, res) => {
+app.post('/webhook/wa-optin', webhookAuth, async (req, res) => {
   try {
     const { phone: rawPhone, first_name } = req.body;
     const phone = rawPhone ? rawPhone.replace(/^\+/, '') : null;
@@ -219,27 +250,22 @@ app.post('/webhook/wa-optin', async (req, res) => {
       return res.status(400).json({ error: 'phone zorunlu' });
     }
 
-    // 1. Notion'da üyeyi bul
     const member = await notion.findByPhone(phone);
     if (!member) {
       log.warn(`[wa-optin] Notion'da kullanıcı bulunamadı: ${phone}`);
       return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
     }
 
-    // 2. Sadece "email" statüsündeyse devam et
     if (member.onboardingStatus !== 'email') {
       log.info(`[wa-optin] Statü "email" değil (${member.onboardingStatus}), atlanıyor: ${phone}`);
       return res.status(200).json({ success: true, skipped: true, reason: `Statü: ${member.onboardingStatus}` });
     }
 
-    // 3. Notion'ı güncelle — email'den WhatsApp'a geçiş
     const currentNotes = member.notes ? `${member.notes}\n` : '';
     const newNote = `${currentNotes}[WA-OPTIN] Kullanıcı email'den WhatsApp'a geçiş yaptı — ${new Date().toISOString()}`;
-
     const currentStep = member.onboardingStep || 0;
 
     if (currentStep >= 6) {
-      // Onboarding zaten son adımda → tamamlandı olarak işaretle
       await notion.updatePage(member.id, {
         onboardingStatus: "tamamlandı",
         onboardingChannel: "whatsapp",
@@ -247,7 +273,6 @@ app.post('/webhook/wa-optin', async (req, res) => {
       });
       log.info(`[wa-optin] Step >= 6, onboarding tamamlandı olarak işaretlendi: ${member.firstName} (${phone})`);
     } else {
-      // Bir sonraki günün flow'unu ManyChat'ten hemen tetikle
       const nextStep = currentStep + 1;
       const nextFlow = ONBOARDING_FLOWS[nextStep];
 
@@ -279,7 +304,7 @@ app.post('/webhook/wa-optin', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // POST /webhook/wa-failed — ManyChat Fallback
 // ─────────────────────────────────────────────────────────────
-app.post('/webhook/wa-failed', async (req, res) => {
+app.post('/webhook/wa-failed', webhookAuth, async (req, res) => {
   try {
     const { phone: rawPhone, reason } = req.body;
     const phone = rawPhone ? rawPhone.replace(/^\+/, '') : null;
@@ -327,6 +352,53 @@ app.post('/webhook/wa-failed', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// POST /admin/trigger-flow — Manuel ManyChat Flow Tetikleme
+// ─────────────────────────────────────────────────────────────
+// Kullanım: Groq hatalı validasyon gibi durumlarda kaçırılan
+// flow'ları manuel olarak tetiklemek için.
+// ─────────────────────────────────────────────────────────────
+app.post('/admin/trigger-flow', adminAuth, async (req, res) => {
+  try {
+    const { phone, first_name, flow_step } = req.body;
+
+    log.info(`[admin/trigger-flow] Gelen istek: ${JSON.stringify(req.body)}`);
+
+    if (!phone || !first_name) {
+      return res.status(400).json({ error: 'phone ve first_name zorunlu' });
+    }
+
+    const step = flow_step !== undefined ? flow_step : 0;
+    const flowConfig = ONBOARDING_FLOWS[step];
+
+    if (!flowConfig || !flowConfig.flow_id) {
+      return res.status(400).json({ error: `Geçersiz flow_step: ${step}` });
+    }
+
+    // ManyChat'te subscriber oluştur + flow tetikle
+    const subscriberId = await manychat.ensureSubscriberAndSendFlow(
+      phone,
+      first_name,
+      flowConfig.flow_id
+    );
+
+    log.info(`[admin/trigger-flow] ✅ Başarılı: ${first_name} → Step ${step} (${flowConfig.description})`);
+
+    res.status(200).json({
+      success: true,
+      subscriberId,
+      flow: {
+        step,
+        flow_id: flowConfig.flow_id,
+        description: flowConfig.description
+      }
+    });
+  } catch (error) {
+    log.error(`[admin/trigger-flow] HATA: ${error.message}`, error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 // GET /health — Monitoring & Watchdog
 // ─────────────────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
@@ -365,5 +437,6 @@ app.listen(PORT, '0.0.0.0', () => {
   log.info(`  POST /webhook/membership-questions`);
   log.info(`  POST /webhook/wa-optin`);
   log.info(`  POST /webhook/wa-failed`);
+  log.info(`  POST /admin/trigger-flow`);
   log.info(`  GET  /health`);
 });
