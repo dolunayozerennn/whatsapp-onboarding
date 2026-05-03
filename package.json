@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "migrate": "node manual_onboard.js",
     "dev": "node --watch server.js",
     "validate": "node -e \"require('./server')\""
   },
@@ -13,9 +14,10 @@
     "dotenv": "16.4.7",
     "express": "4.21.2",
     "moment-timezone": "0.5.43",
+    "libphonenumber-js": "1.12.8",
     "node-cron": "3.0.3"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }

@@ -6,9 +6,19 @@ node_modules/
 *.log
 .DS_Store
 antigravity_whatsapp_onboarding_v2.md
-test_*.js
-push_to_github.js
-push_bypass_dns.js
-push_to_monorepo.js
-sync_all_to_github.js
+
+# Tests klasörü tracked ama ad-hoc — yeni test dosyaları default olarak gitignore
+# (Bilinçli commit edilenler `git add -f` ile eklenir.)
+tests/test_*.js
+tests/scratch*.js
+tests/trigger*.js
+tests/check_*.js
+
 mcp_files.json
+Eski Onboarding Workflow*
+samples.json
+schema.json
+
+# Veri dosyaları — kişisel bilgi içerir, repo'ya GITMEMELI
+*.csv
+import_old_users.js

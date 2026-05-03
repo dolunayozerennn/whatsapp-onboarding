@@ -11,7 +11,11 @@ const REQUIRED_VARS = [
   'NOTION_API_KEY',
   'NOTION_DATABASE_ID',
   'MANYCHAT_API_TOKEN',
-  'GROQ_API_KEY'
+  // Groq, telefon validasyonu için kullanılır (OpenAI uyumlu endpoint).
+  // DEPRECATED: OPENAI_API_KEY artık kullanılmıyor — yalnızca GROQ_API_KEY zorunlu.
+  'GROQ_API_KEY',
+  // Webhook auth fail-secure: secret zorunlu, yoksa boot çöker.
+  'WEBHOOK_SECRET'
 ];
 
 // Opsiyonel — yoksa uyarı verir ama çökmez
@@ -19,7 +23,6 @@ const OPTIONAL_VARS = [
   'RESEND_API_KEY',
   'RESEND_FROM_EMAIL',
   'WA_BUSINESS_PHONE',
-  'WEBHOOK_SECRET',
   'ADMIN_SECRET'
 ];
 
@@ -37,7 +40,7 @@ function validateEnv() {
   // Opsiyonel kontrol
   const missingOptional = OPTIONAL_VARS.filter(v => !process.env[v]);
   if (missingOptional.length > 0) {
-    console.warn(`⚠️  Opsiyonel env yok (email fallback devre dışı): ${missingOptional.join(', ')}`);
+    console.warn(`⚠️  Opsiyonel env yok (email fallback / admin auth devre dışı): ${missingOptional.join(', ')}`);
   }
 }
 
@@ -54,7 +57,7 @@ module.exports = {
     cronTimezone: process.env.CRON_TIMEZONE || 'Europe/Istanbul',
     cronSchedule: process.env.CRON_SCHEDULE || '0 12 * * *',
     waBusinessPhone: process.env.WA_BUSINESS_PHONE || '',
-    webhookSecret: process.env.WEBHOOK_SECRET || null,
+    webhookSecret: process.env.WEBHOOK_SECRET, // artık zorunlu — fail-fast tarafından garanti
     adminSecret: process.env.ADMIN_SECRET || null
   }
 };
