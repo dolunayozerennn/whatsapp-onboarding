@@ -40,6 +40,11 @@ KURALLAR (KRİTİK):
 4. Numara '05' ile başlıyorsa ve toplam 11 rakamsa başa '+9' ekle.
 5. Numara '905' ile başlıyorsa ve toplam 12 rakamsa başa '+' ekle.
 6. Kullanıcı sohbet veya itiraz ediyorsa valid: false döndür.
+6a. REDDETME ÖRNEKLERİ — kullanıcı numara paylaşmak ISTEMIYORSA valid: false döndür ve reason="kullanıcı paylaşmak istemedi" yaz. Aşağıdaki gibi cevaplar bu kategoridedir (bunlarla sınırlı değil):
+   - "gerek yok", "istemiyorum", "vermek istemiyorum", "paylaşmak istemiyorum"
+   - "yok", "hayır", "olmaz", "gizli kalsın", "vermeyeceğim"
+   - "telefon istemem", "geçmek istiyorum"
+   Bu durumda halüsine numara üretme; kesinlikle valid:false, normalized:null, confidence:1.0 dön.
 7. ÇOKLU NUMARA DURUMU: Eğer metinde birden fazla numara varsa, bağlama bakarak "güncel", "yeni" veya "benim" gibi kelimelerle ilişkilendirilen numarayı seç. 
 8. BELİRSİZ ÇOKLU NUMARA DURUMU: Eğer bağlam belirsizse (hangisinin doğru olduğu açık değilse), metinde geçen EN SON numarayı baz al. Ancak bu durumda "confidence" (güven) değerini düşür (örneğin 0.4). Tek numara varsa veya açıkça hangisi olduğu belliyse confidence'ı yüksek tut (örneğin 0.9 - 1.0 arası).`;
 
@@ -178,8 +183,35 @@ function libraryFallback(input) {
   return { valid: false, normalized: null, reason: "Geçerli telefon numarası bulunamadı", confidence: 0.0, extracted_raw: input };
 }
 
+// ─── KATMAN 0: Reddetme Fast-Path ─────────────────────────────
+// Kullanıcı açıkça numara paylaşmak istemiyorsa Groq'a gitmeden
+// direkt valid:false döndür. Sebep: Groq bazı reddetme cümlelerini
+// numara halüsinasyonu üretmek için bahane edebiliyor (örn. "gerek yok"
+// → tx_id parçasından numara çıkarmaya çalışmak). Determinist + ucuz.
+const REDDETME_REGEX = /\b(gerek\s*yok|istemem|istemiyorum|vermek\s*istemiyorum|paylaşmak\s*istemiyorum|paylasmak\s*istemiyorum|vermeyeceğim|vermeyecegim|gizli|hayır|hayir|olmaz|geçmek\s*istiyorum|gecmek\s*istiyorum|telefon\s*(yok|istemem))\b/i;
+
+function isExplicitRefusal(input) {
+  if (!input) return false;
+  // Yalnızca metin (rakam yok) ya da çok az rakam içeren girdilerde uygula
+  const digitsOnly = String(input).replace(/\D/g, '');
+  if (digitsOnly.length >= 7) return false; // gerçek numara olabilir
+  return REDDETME_REGEX.test(String(input));
+}
+
 // ─── ANA FONKSİYON ──────────────────────────────────────────
 async function validatePhone(input) {
+  // KATMAN 0: Açık reddetme tespit edilirse Groq'u atla
+  if (isExplicitRefusal(input)) {
+    log.info(`[phoneValidator] ⛔ Açık reddetme tespit edildi (fast-path), email fallback uygulanacak`);
+    return {
+      valid: false,
+      normalized: null,
+      reason: "Kullanıcı telefon paylaşmak istemedi",
+      confidence: 1.0,
+      extracted_raw: input
+    };
+  }
+
   // KATMAN 1: libphonenumber pre-validation (saf numerik girdiler)
   const libResult = libraryValidate(input);
   if (libResult) {

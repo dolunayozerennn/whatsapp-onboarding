@@ -253,7 +253,7 @@ app.post('/webhook/new-paid-member', webhookAuth, async (req, res) => {
 // POST /webhook/membership-questions — Zapier Zap #2
 // ─────────────────────────────────────────────────────────────
 app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
-  const { transaction_id, first_name, last_name, answer_1, email } = req.body;
+  const { transaction_id, first_name, last_name, answer_1, email, date } = req.body;
 
   log.info(`[membership-questions] Gelen veri: ${JSON.stringify(req.body)}`);
 
