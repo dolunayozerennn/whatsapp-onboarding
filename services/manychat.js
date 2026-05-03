@@ -7,7 +7,8 @@
 
 const { config } = require('../config/env');
 const log = require('../utils/logger');
-const { toE164 } = require('../utils/phone');
+// NOT: utils/phone.js (toE164) standalone repo'da yok ve libphonenumber-js
+// dependency'si de eklenmedi → CRASHED. Inline normalizasyon kullanıyoruz.
 
 const API_URL = "https://api.manychat.com/fb";
 const headers = {
@@ -56,13 +57,10 @@ async function fetchWithRetry(url, options, retries = 1) {
   }
 }
 
-// Faz 3 P1 #16: Telefon E.164 normalizasyonu — merkezi helper kullanır.
-// libphonenumber-js geçemezse en azından + ekleyip eski davranışı koru
-// (ManyChat aramaları + olmadan da denenir, fallback'ler aşağıdaki katmanlarda).
+// Telefon E.164 normalizasyonu — minimal inline (utils/phone.js bağımlılığı kaldırıldı).
+// ManyChat aramaları + olmadan da denenir, fallback'ler aşağıdaki katmanlarda.
 function normalizePhone(phone) {
   if (!phone) return phone;
-  const e164 = toE164(phone);
-  if (e164) return e164;
   let cleaned = String(phone).replace(/[\s\-()]/g, '');
   if (!cleaned.startsWith('+')) cleaned = '+' + cleaned;
   return cleaned;
