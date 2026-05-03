@@ -191,7 +191,17 @@ async function createSubscriber(phoneNumber, firstName) {
       log.info(`[manychat:api] Conflict sonrası mevcut subscriber bulundu.`, { existingId });
       return existingId;
     }
-    
+
+    // wa_id validation: numarada WhatsApp hesabı yok (Meta WA Cloud resolve edemiyor).
+    // Beklenen kullanıcı-veri durumu — caller email fallback'e düşürebilsin diye tipli fırlatıyoruz.
+    if (data.message === 'Validation error' && data.details && data.details.messages && data.details.messages.wa_id) {
+      log.warn(`[manychat:api] wa_id validation: numarada WhatsApp hesabı yok → ${phoneNumber}`);
+      const waErr = new Error(`WhatsApp hesabı bulunamadı: ${phoneNumber}`);
+      waErr.code = 'WA_ID_INVALID';
+      waErr.phoneNumber = phoneNumber;
+      throw waErr;
+    }
+
     // Eğer yaratılamadıysa ve bulunamadıysa (gerçek bir API hatası olabilir, örn geçersiz telefon formatı)
     const errReason = data.message || JSON.stringify(data);
     log.error(`[manychat:api] Subscriber yaratılamadı ve aramalarda da bulunamadı. Sebep: ${errReason}`);
@@ -517,5 +527,6 @@ module.exports = {
   findSubscriberByName,
   setCustomFields,
   sendFlow,
-  validateAllFlows
+  validateAllFlows,
+  WA_ID_INVALID: 'WA_ID_INVALID'
 };

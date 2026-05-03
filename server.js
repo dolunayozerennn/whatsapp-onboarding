@@ -372,41 +372,74 @@ app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
         }
       }
 
-      // 5. ManyChat'te subscriber oluştur + Gün 0 flow'unu tetikle
-      await manychat.ensureSubscriberAndSendFlow(
-        phoneResult.normalized,
-        first_name,
-        ONBOARDING_FLOWS[0].flow_id
-      );
+      // 5. ManyChat'te subscriber oluştur + Gün 0 flow'unu tetikle.
+      // WA_ID_INVALID: numarada WhatsApp hesabı yok → kullanıcıyı email akışına düşür (sessiz kayıp engeli).
+      let waSucceeded = true;
+      try {
+        await manychat.ensureSubscriberAndSendFlow(
+          phoneResult.normalized,
+          first_name,
+          ONBOARDING_FLOWS[0].flow_id
+        );
+      } catch (waErr) {
+        if (waErr.code === manychat.WA_ID_INVALID) {
+          waSucceeded = false;
+          log.warn(`[membership-questions] WhatsApp hesabı bulunamadı (${phoneResult.normalized}), email fallback'e düşülüyor: ${first_name}`);
+          await notion.appendNote(member.id, `WhatsApp hesabı bulunamadı (wa_id validation), email akışına alındı. Telefon: ${phoneResult.normalized}`);
+        } else {
+          throw waErr;
+        }
+      }
 
-      // 6. Notion'ı güncelle.
-      // Faz 3 NEW (5am cutoff bug fix): startDate her zaman bugün (Istanbul).
-      // Önceki hour<6 rollback aynı gün Day 0 + Day 1 gönderilmesine yol açıyordu.
       const startDateWa = moment().tz('Europe/Istanbul').format('YYYY-MM-DD');
-      
       const memberCleanEmail = (member.email && member.email !== 'No data' && member.email.includes('@')) ? member.email : null;
-      
-      if (memberCleanEmail) {
-        await notion.updatePage(member.id, {
-          phone: phoneResult.normalized,
-          onboardingStatus: "dual",
-          onboardingChannel: "dual",
-          onboardingStep: 0,
-          onboardingStartDate: startDateWa
-        });
-        
-        await resend.sendOnboardingEmail(memberCleanEmail, first_name, 0);
-        log.info(`[membership-questions] Dual onboarding baslatildi: ${first_name} WA + Email`);
-      } else {
-        await notion.updatePage(member.id, {
-          phone: phoneResult.normalized,
-          onboardingStatus: "whatsapp",
-          onboardingChannel: "whatsapp",
-          onboardingStep: 0,
-          onboardingStartDate: startDateWa
-        });
 
-        log.info(`[membership-questions] Sadece WA onboarding (email yok): ${first_name}`);
+      if (waSucceeded) {
+        if (memberCleanEmail) {
+          await notion.updatePage(member.id, {
+            phone: phoneResult.normalized,
+            onboardingStatus: "dual",
+            onboardingChannel: "dual",
+            onboardingStep: 0,
+            onboardingStartDate: startDateWa
+          });
+          await resend.sendOnboardingEmail(memberCleanEmail, first_name, 0);
+          log.info(`[membership-questions] Dual onboarding baslatildi: ${first_name} WA + Email`);
+        } else {
+          await notion.updatePage(member.id, {
+            phone: phoneResult.normalized,
+            onboardingStatus: "whatsapp",
+            onboardingChannel: "whatsapp",
+            onboardingStep: 0,
+            onboardingStartDate: startDateWa
+          });
+          log.info(`[membership-questions] Sadece WA onboarding (email yok): ${first_name}`);
+        }
+      } else {
+        // WA_ID_INVALID → email-only fallback
+        if (memberCleanEmail) {
+          await resend.sendOnboardingEmail(memberCleanEmail, first_name, 0);
+          await notion.updatePage(member.id, {
+            phone: phoneResult.normalized,
+            onboardingStatus: "email",
+            onboardingChannel: "email",
+            onboardingStep: 0,
+            onboardingStartDate: startDateWa
+          });
+          log.info(`[membership-questions] Email fallback (WA hesabı yok): ${first_name}`);
+        } else {
+          await notion.updatePage(member.id, {
+            phone: phoneResult.normalized,
+            onboardingStatus: "error"
+          });
+          await notion.appendNote(member.id, `WhatsApp hesabı bulunamadı ve geçerli email adresi de yok. Sistemde tıkandı.`);
+          log.warn(`[membership-questions] Sessiz Kayıp: WA yok + email yok (status: error)`);
+          await resend.sendAdminAlertEmail(`Zombie Üye Tespit Edildi (WA hesabı yok, email yok)`, {
+            error: `WhatsApp hesabı bulunamadı (${phoneResult.normalized}) ve geçerli email yok.`,
+            transaction_id: transaction_id,
+            first_name: first_name
+          }).catch(e => log.error('Admin alert failed', e));
+        }
       }
 
     } else {
