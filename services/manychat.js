@@ -7,28 +7,48 @@
 
 const { config } = require('../config/env');
 const log = require('../utils/logger');
+const { toE164 } = require('../utils/phone');
 
 const API_URL = "https://api.manychat.com/fb";
 const headers = {
   'Authorization': `Bearer ${config.manychatApiToken}`,
-  'Content-Type': 'application/json'
+  'Content-Type': 'application/json',
+  'Accept': 'application/json',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 };
 
 let customFieldsCache = null;
 let customFieldsFetchPromise = null; // Fix: Cache stampede önleme
 
-// Fix: fetchWithRetry — 8s timeout + 1 retry
+// Fix: JSON Parsing Helper
+async function parseJsonResponse(response, context = '') {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await response.text();
+    throw new Error(`ManyChat API JSON dönmedi (${response.status} ${response.statusText}) [${context}]. Content-Type: ${contentType}. Body: ${text.substring(0, 500)}`);
+  }
+  return await response.json();
+}
+
+// Faz 3 P1 #13: fetchWithRetry — 10s timeout + 1 retry.
+// AbortError/TimeoutError + ECONNRESET/ETIMEDOUT/ENOTFOUND ağ hatalarında retry.
 async function fetchWithRetry(url, options, retries = 1) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetch(url, {
         ...options,
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(10000)
       });
       return response;
     } catch (err) {
-      if (attempt < retries && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-        log.warn(`[manychat:retry] Timeout, tekrar deneniyor... (${attempt + 1}/${retries})`);
+      const retriable = err.name === 'TimeoutError'
+        || err.name === 'AbortError'
+        || err.code === 'ECONNRESET'
+        || err.code === 'ETIMEDOUT'
+        || err.code === 'ENOTFOUND'
+        || err.code === 'EAI_AGAIN';
+      if (attempt < retries && retriable) {
+        log.warn(`[manychat:retry] Geçici ağ hatası (${err.name || err.code}), tekrar deneniyor... (${attempt + 1}/${retries})`);
         continue;
       }
       throw err;
@@ -36,10 +56,14 @@ async function fetchWithRetry(url, options, retries = 1) {
   }
 }
 
-// Fix: Telefon numarası normalizasyonu
+// Faz 3 P1 #16: Telefon E.164 normalizasyonu — merkezi helper kullanır.
+// libphonenumber-js geçemezse en azından + ekleyip eski davranışı koru
+// (ManyChat aramaları + olmadan da denenir, fallback'ler aşağıdaki katmanlarda).
 function normalizePhone(phone) {
   if (!phone) return phone;
-  let cleaned = phone.replace(/[\s\-()]/g, '');
+  const e164 = toE164(phone);
+  if (e164) return e164;
+  let cleaned = String(phone).replace(/[\s\-()]/g, '');
   if (!cleaned.startsWith('+')) cleaned = '+' + cleaned;
   return cleaned;
 }
@@ -56,12 +80,12 @@ async function getCustomFieldId(fieldName) {
   }
 
   try {
-    customFieldsFetchPromise = fetchWithRetry(`${API_URL}/subscriber/getCustomFields`, {
+    customFieldsFetchPromise = fetchWithRetry(`${API_URL}/page/getCustomFields`, {
       method: 'GET',
       headers
     });
     const response = await customFieldsFetchPromise;
-    const data = await response.json();
+    const data = await parseJsonResponse(response, 'getCustomFields');
     if (data.status === 'success' && data.data) {
       customFieldsCache = {};
       for (const field of data.data) {
@@ -90,13 +114,15 @@ async function ensureSubscriberAndSendFlow(phoneNumber, firstName, flowId) {
 
   // 1. Subscriber'ı bulmaya çalış (custom field üzerinden)
   subscriberId = await findSubscriberByPhone(phoneNumber);
-  log.debug(`[manychat:engine] Arama sonucu (Custom Field):`, { subscriberId });
 
+  // 2. Eğer custom field ile bulunamadıysa, system fields üzerinden ara (fallback)
   if (!subscriberId) {
-    // 2. Eğer Custom Field'da yoksa, System Field (phone) üzerinden ara 
-    // Önceden WhatsApp'tan yazmış kişiler otomatik olarak bu alana kaydedilmiş olabilir.
     subscriberId = await findSubscriberBySystemPhone(phoneNumber);
-    log.debug(`[manychat:engine] Arama sonucu (System Field):`, { subscriberId });
+  }
+  
+  // 2.5 Eğer system fields de bulamazsa name ile ara
+  if (!subscriberId) {
+    subscriberId = await findSubscriberByName(firstName, phoneNumber);
   }
 
   if (!subscriberId) {
@@ -104,39 +130,36 @@ async function ensureSubscriberAndSendFlow(phoneNumber, firstName, flowId) {
     log.info(`[manychat:engine] Subscriber bulunamadı, oluşturuluyor...`);
     subscriberId = await createSubscriber(phoneNumber, firstName);
   } else {
-    log.info(`[manychat:engine] Mevcut subscriber bulundu, oluşturma adımı atlanıyor.`);
+    log.info(`[manychat:engine] Mevcut subscriber bulundu: ${subscriberId}`);
   }
 
   if (!subscriberId) {
-    const errMsg = `Subscriber ID alınamadı (ne yaratılabildi ne de bulunabildi).`;
-    log.error(`[manychat:engine] FATAL: ${errMsg}`, context);
+    const errMsg = `Subscriber ID alınamadı (ne yaratılabildi ne de bulunabildi). ManyChat API kısıtlaması nedeniyle WhatsApp atlanacak.`;
+    log.warn(`[manychat:engine] WARN: ${errMsg}`, context);
     throw new Error(errMsg);
   }
 
-  // 4. Custom field'ları güncelle (template değişkenleri için)
-  log.debug(`[manychat:engine] Custom fields güncelleniyor...`, { subscriberId });
+  // 4. Custom field'ları güncelle.
+  // NOT: ManyChat hesabında yalnızca `whatsapp_phone_text` ve `onboarding_name` custom field'ları
+  // tanımlı. Daha önce gönderilen `phone_text` ve `last_name` ManyChat'te custom field olarak
+  // mevcut değildi → her çağrıda "Field[1] not found" Validation error üretiyordu.
+  // (`last_name` ayrıca system field, custom field endpoint'inden set edilemez.)
   await setCustomFields(subscriberId, {
-    onboarding_name: firstName,
     whatsapp_phone_text: phoneNumber
   });
 
-  // 4. Flow'u tetikle (template mesajı bu flow'un içinde)
-  log.info(`[manychat:engine] Flow gönderimi çağrılıyor...`, { subscriberId, flowId });
-  const flowResult = await sendFlow(subscriberId, flowId);
+  // 5. Flow'u tetikle
+  await sendFlow(subscriberId, flowId);
 
-  log.info(`[manychat:engine] ✅ Flow gönderimi başarıyla tamamlandı.`, { 
-    subscriberId, 
-    flowId, 
-    manychatStatus: flowResult.status 
-  });
-  
+  log.info(`[manychat:engine] Flow başarıyla tetiklendi.`, { subscriberId, flowId });
   return subscriberId;
 }
 
 async function createSubscriber(phoneNumber, firstName) {
   try {
+    const cleanFirstName = firstName ? firstName.trim() : '';
     const payload = {
-      first_name: firstName,
+      first_name: cleanFirstName,
       whatsapp_phone: phoneNumber,
       consent_phrase: "onboarding"
     };
@@ -149,7 +172,7 @@ async function createSubscriber(phoneNumber, firstName) {
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    const data = await parseJsonResponse(response, 'createSubscriber');
     log.debug(`[manychat:api] createSubscriber yanıtı.`, data);
 
     if (data.status === 'success') {
@@ -163,10 +186,18 @@ async function createSubscriber(phoneNumber, firstName) {
     if (!existingId) {
       existingId = await findSubscriberBySystemPhone(phoneNumber);
     }
+    if (!existingId) {
+      existingId = await findSubscriberByName(firstName, phoneNumber);
+    }
     if (existingId) {
       log.info(`[manychat:api] Conflict sonrası mevcut subscriber bulundu.`, { existingId });
+      return existingId;
     }
-    return existingId;
+    
+    // Eğer yaratılamadıysa ve bulunamadıysa (gerçek bir API hatası olabilir, örn geçersiz telefon formatı)
+    const errReason = data.message || JSON.stringify(data);
+    log.error(`[manychat:api] Subscriber yaratılamadı ve aramalarda da bulunamadı. Sebep: ${errReason}`);
+    throw new Error(`ManyChat API Hatası: ${errReason}`);
 
   } catch (error) {
     log.error(`[manychat:api] ❌ createSubscriber ağ hatası: ${error.message}`, error);
@@ -191,12 +222,49 @@ async function findSubscriberByPhone(phoneNumber) {
       headers
     });
 
-    const data = await response.json();
+    const data = await parseJsonResponse(response, 'findByCustomField');
     log.debug(`[manychat:api] findByCustomField yanıtı.`, data);
 
+    let foundId = null;
     if (data.status === 'success' && data.data) {
-      log.info(`[manychat:api] ✅ Subscriber başarıyla bulundu.`, { id: data.data.id });
-      return data.data.id;
+      if (Array.isArray(data.data) && data.data.length > 0) {
+        foundId = data.data[0].id;
+      } else if (!Array.isArray(data.data) && data.data.id) {
+        foundId = data.data.id;
+      }
+    }
+
+    if (foundId) {
+      log.info(`[manychat:api] ✅ Subscriber başarıyla bulundu.`, { id: foundId });
+      return foundId;
+    }
+
+    // Try without '+' sign if not found
+    if (!foundId && phoneNumber.startsWith('+')) {
+      const phoneNoPlus = phoneNumber.substring(1);
+      const urlNoPlus = `${API_URL}/subscriber/findByCustomField?field_id=${fieldId}&field_value=${encodeURIComponent(phoneNoPlus)}`;
+      log.debug(`[manychat:api] findByCustomField (without +) isteği atılıyor.`, { url: urlNoPlus });
+      
+      const responseNoPlus = await fetchWithRetry(urlNoPlus, {
+        method: 'GET',
+        headers
+      });
+
+      const dataNoPlus = await parseJsonResponse(responseNoPlus, 'findByCustomField_NoPlus');
+      log.debug(`[manychat:api] findByCustomField (without +) yanıtı.`, dataNoPlus);
+
+      if (dataNoPlus.status === 'success' && dataNoPlus.data) {
+        if (Array.isArray(dataNoPlus.data) && dataNoPlus.data.length > 0) {
+          foundId = dataNoPlus.data[0].id;
+        } else if (!Array.isArray(dataNoPlus.data) && dataNoPlus.data.id) {
+          foundId = dataNoPlus.data.id;
+        }
+      }
+    }
+
+    if (foundId) {
+      log.info(`[manychat:api] ✅ Subscriber başarıyla bulundu (without +).`, { id: foundId });
+      return foundId;
     }
 
     log.info(`[manychat:api] ℹ️ Subscriber bulunamadı.`);
@@ -209,27 +277,57 @@ async function findSubscriberByPhone(phoneNumber) {
 
 async function findSubscriberBySystemPhone(phoneNumber) {
   try {
-    // ManyChat system field araması GET isteği ile yapılır.
-    // Telefon numaralarındaki artı işareti vb. encode edilmeli.
-    const url = `${API_URL}/subscriber/findBySystemField?phone=${encodeURIComponent(phoneNumber)}`;
-    log.debug(`[manychat:api] findBySystemField (phone) isteği atılıyor.`, { url });
-
-    const response = await fetchWithRetry(url, {
-      method: 'GET',
-      headers
-    });
-
-    const data = await response.json();
-    log.debug(`[manychat:api] findBySystemField (phone) yanıtı.`, data);
-
-    // data.data can be an array if search results are returned, or an object if it's a direct match.
-    // Also, if it's an empty array `[]`, it shouldn't be treated as a successful find.
+    // ManyChat findBySystemField yalnızca `phone` veya `email` kabul eder.
+    // `whatsapp_phone` system field değildir → "Only phone or email can be specified" hatası.
+    // WhatsApp telefonu için `findByCustomField` (whatsapp_phone_text) kullanılıyor zaten.
+    const searchFields = ['phone'];
     let foundId = null;
-    if (data.status === 'success' && data.data) {
-      if (Array.isArray(data.data) && data.data.length > 0) {
-        foundId = data.data[0].id;
-      } else if (!Array.isArray(data.data) && data.data.id) {
-        foundId = data.data.id;
+
+    for (const field of searchFields) {
+      if (foundId) break;
+
+      // ManyChat system field araması GET isteği ile yapılır.
+      // Telefon numaralarındaki artı işareti vb. encode edilmeli.
+      let url = `${API_URL}/subscriber/findBySystemField?${field}=${encodeURIComponent(phoneNumber)}`;
+      log.debug(`[manychat:api] findBySystemField (${field}) isteği atılıyor.`, { url });
+
+      let response = await fetchWithRetry(url, {
+        method: 'GET',
+        headers
+      });
+
+      let data = await parseJsonResponse(response, `findBySystemField_${field}`);
+      log.debug(`[manychat:api] findBySystemField (${field}) yanıtı.`, data);
+
+      if (data.status === 'success' && data.data) {
+        if (Array.isArray(data.data) && data.data.length > 0) {
+          foundId = data.data[0].id;
+        } else if (!Array.isArray(data.data) && data.data.id) {
+          foundId = data.data.id;
+        }
+      }
+
+      // Try without '+' sign if not found
+      if (!foundId && phoneNumber.startsWith('+')) {
+        const phoneNoPlus = phoneNumber.substring(1);
+        url = `${API_URL}/subscriber/findBySystemField?${field}=${encodeURIComponent(phoneNoPlus)}`;
+        log.debug(`[manychat:api] findBySystemField (${field} without +) isteği atılıyor.`, { url });
+        
+        response = await fetchWithRetry(url, {
+          method: 'GET',
+          headers
+        });
+        
+        data = await parseJsonResponse(response, `findBySystemField_${field}_NoPlus`);
+        log.debug(`[manychat:api] findBySystemField (${field} without +) yanıtı.`, data);
+        
+        if (data.status === 'success' && data.data) {
+          if (Array.isArray(data.data) && data.data.length > 0) {
+            foundId = data.data[0].id;
+          } else if (!Array.isArray(data.data) && data.data.id) {
+            foundId = data.data.id;
+          }
+        }
       }
     }
 
@@ -241,13 +339,63 @@ async function findSubscriberBySystemPhone(phoneNumber) {
     log.info(`[manychat:api] ℹ️ Subscriber system field ile bulunamadı.`);
     return null;
   } catch (error) {
-    log.error(`[manychat:api] ❌ findBySystemField (phone) ağ hatası: ${error.message}`, error);
+    log.error(`[manychat:api] ❌ findBySystemField ağ hatası: ${error.message}`, error);
+    return null;
+  }
+}
+
+async function findSubscriberByName(name, phoneNumber) {
+  if (!name) return null;
+  const cleanName = name.trim();
+  try {
+    const url = `${API_URL}/subscriber/findByName?name=${encodeURIComponent(cleanName)}`;
+    log.debug(`[manychat:api] findByName isteği atılıyor.`, { url });
+    
+    const response = await fetchWithRetry(url, {
+      method: 'GET',
+      headers
+    });
+
+    const data = await parseJsonResponse(response, 'findByName');
+    log.debug(`[manychat:api] findByName yanıtı.`, { status: data.status, count: data.data?.length });
+
+    if (data.status === 'success' && data.data && Array.isArray(data.data)) {
+      if (data.data.length === 0) {
+        log.info(`[manychat:api] ℹ️ Subscriber isimden bulunamadı.`);
+        return null;
+      }
+      
+      const cleanTargetPhone = normalizePhone(phoneNumber);
+      const cleanTargetPhoneNoPlus = cleanTargetPhone.startsWith('+') ? cleanTargetPhone.substring(1) : cleanTargetPhone;
+      
+      for (const sub of data.data) {
+        const wp = sub.whatsapp_phone ? normalizePhone(sub.whatsapp_phone) : null;
+        const ph = sub.phone ? normalizePhone(sub.phone) : null;
+        
+        if (wp === cleanTargetPhone || wp === cleanTargetPhoneNoPlus || ph === cleanTargetPhone || ph === cleanTargetPhoneNoPlus) {
+           log.info(`[manychat:api] ✅ Subscriber isim ve telefon eşleşmesiyle bulundu.`, { id: sub.id });
+           return sub.id;
+        }
+      }
+      
+      if (data.data.length === 1) {
+         log.info(`[manychat:api] ✅ Subscriber sadece isim eşleşmesiyle bulundu (tek eşleşme).`, { id: data.data[0].id });
+         return data.data[0].id;
+      }
+      
+      log.warn(`[manychat:api] ⚠️ İsim eşleşmesi bulundu ama telefon tutmadı ve birden fazla kayıt var. Güvenlik için atlanıyor.`);
+    }
+    
+    return null;
+  } catch (error) {
+    log.error(`[manychat:api] ❌ findByName ağ hatası: ${error.message}`, error);
     return null;
   }
 }
 
 async function setCustomFields(subscriberId, fields) {
   const fieldArray = [];
+  const skipped = [];
   for (const [name, value] of Object.entries(fields)) {
     const fieldId = await getCustomFieldId(name);
     if (fieldId) {
@@ -256,12 +404,20 @@ async function setCustomFields(subscriberId, fields) {
         field_value: String(value)
       });
     } else {
-      // Fallback: If ID not found, try sending with field_name
-      fieldArray.push({
-        field_name: name,
-        field_value: String(value)
-      });
+      // ManyChat custom field tanımlı değilse atla.
+      // Eskiden field_name fallback gönderiliyordu ama API tanımsız field için
+      // "Field[N] not found" Validation error döndürüyor — bu yüzden sessizce atlıyoruz.
+      skipped.push(name);
     }
+  }
+
+  if (skipped.length > 0) {
+    log.warn(`[manychat:api] setCustomFields: Tanımlı olmayan field'lar atlandı.`, { skipped });
+  }
+
+  if (fieldArray.length === 0) {
+    log.info(`[manychat:api] setCustomFields: gönderilecek field yok, çağrı atlanıyor.`);
+    return;
   }
 
   const payload = {
@@ -277,7 +433,7 @@ async function setCustomFields(subscriberId, fields) {
     body: JSON.stringify(payload)
   });
 
-  const data = await response.json();
+  const data = await parseJsonResponse(response, 'setCustomFields');
   log.debug(`[manychat:api] setCustomFields yanıtı.`, data);
 
   if (data.status !== 'success') {
@@ -301,7 +457,7 @@ async function sendFlow(subscriberId, flowId) {
     body: JSON.stringify(payload)
   });
 
-  const data = await response.json();
+  const data = await parseJsonResponse(response, 'sendFlow');
   log.debug(`[manychat:api] sendFlow yanıtı.`, data);
 
   if (data.status !== 'success') {
@@ -312,11 +468,56 @@ async function sendFlow(subscriberId, flowId) {
   return data;
 }
 
+// ─── Boot Validation: ManyChat Flow ID'leri ───────────────────
+// NOT: ManyChat'in dokümante edilmiş bir "get flow info" public endpoint'i yok.
+// Bu yüzden iki katmanlı kontrol yapıyoruz:
+//   1) Format heuristic — ID `content` ile başlamalı, en az 20 karakter olmalı
+//      (ManyChat flow ns format: "content<YYYYMMDDHHMMSS>_<6digit>").
+//   2) API erişim sağlık kontrolü — getCustomFields çağrısı ile token'ın geçerli
+//      ve API'nin ulaşılabilir olduğunu doğrula. Asıl flow varlığı runtime'da
+//      sendFlow başarısızlığından (`Flow not found`) yakalanır ve admin'e alert gider.
+async function validateAllFlows(flowIds) {
+  const bad = [];
+  const FLOW_NS_PATTERN = /^content\d{14}_\d{6}$/;
+
+  for (const id of flowIds) {
+    if (!id || typeof id !== 'string') {
+      bad.push({ id, reason: 'boş veya string değil' });
+      continue;
+    }
+    if (!FLOW_NS_PATTERN.test(id)) {
+      bad.push({ id, reason: 'flow_ns format hatalı (beklenen: content<14digit>_<6digit>)' });
+    }
+  }
+
+  if (bad.length > 0) {
+    const detail = bad.map(b => `  - ${b.id}: ${b.reason}`).join('\n');
+    throw new Error(`ManyChat flow validation hatası:\n${detail}`);
+  }
+
+  // API sağlık kontrolü — token geçerli mi? (custom fields herkes için varsayılan)
+  try {
+    const response = await fetchWithRetry(`${API_URL}/page/getCustomFields`, {
+      method: 'GET',
+      headers
+    });
+    const data = await parseJsonResponse(response, 'validateAllFlows:healthcheck');
+    if (data.status !== 'success') {
+      throw new Error(`ManyChat API sağlık kontrolü başarısız: ${JSON.stringify(data)}`);
+    }
+    log.info(`[manychat:validate] ✅ API sağlık kontrolü başarılı, ${flowIds.length} flow_ns format doğrulandı.`);
+  } catch (error) {
+    throw new Error(`ManyChat API erişilemiyor (validateAllFlows): ${error.message}`);
+  }
+}
+
 module.exports = {
   ensureSubscriberAndSendFlow,
   createSubscriber,
   findSubscriberByPhone,
   findSubscriberBySystemPhone,
+  findSubscriberByName,
   setCustomFields,
-  sendFlow
+  sendFlow,
+  validateAllFlows
 };
