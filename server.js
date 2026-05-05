@@ -298,20 +298,20 @@ app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
 
     // 2. Notion'da kaydı bul.
     // Faz 3 P1 #15: Zapier Zap #2 bazen Zap #1'den önce ulaşıyor (sıra garantisi yok).
-    // Doğrudan placeholder yaratmak yerine 6 retry × 2s ile new-paid-member'ı bekle.
-    // Toplam ~12s; webhook timeout (Zapier 30s) bunun üstünde, güvenli.
+    // Doğrudan placeholder yaratmak yerine 14 retry × 2s ile new-paid-member'ı bekle.
+    // Toplam ~28s; Zapier webhook timeout 30s — güvenli marj.
     let member = await notion.findByTransactionId(transaction_id);
     let raceRetried = false;
     if (!member) {
-      for (let attempt = 1; attempt <= 6; attempt++) {
+      for (let attempt = 1; attempt <= 14; attempt++) {
         await new Promise(r => setTimeout(r, 2000));
         member = await notion.findByTransactionId(transaction_id);
         if (member) {
-          log.info(`[membership-questions] Race retry başarılı (deneme ${attempt}/6): ${transaction_id}`);
+          log.info(`[membership-questions] Race retry başarılı (deneme ${attempt}/14): ${transaction_id}`);
           raceRetried = true;
           break;
         }
-        log.info(`[membership-questions] Race retry deneme ${attempt}/6 boş döndü: ${transaction_id}`);
+        log.info(`[membership-questions] Race retry deneme ${attempt}/14 boş döndü: ${transaction_id}`);
       }
     }
 
@@ -325,11 +325,11 @@ app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
           registrationDate: date || moment().tz('Europe/Istanbul').format('YYYY-MM-DD'),
           onboardingStatus: "error"
         });
-        await notion.appendNote(member.id, "[HATA] membership-questions arrived before new-paid-member (6×2s retry sonrası bulunamadı), email yok.");
+        await notion.appendNote(member.id, "[HATA] membership-questions arrived before new-paid-member (14×2s retry sonrası bulunamadı), email yok.");
         log.warn(`[membership-questions] Yeni kayıt "error" statüsünde oluşturuldu (Race + Email eksik)`);
 
         await resend.sendAdminAlertEmail(`Zombie Üye Tespit Edildi (Zap #2)`, {
-          error: "Yeni üye Zap #2 (membership-questions) ile oluşturulmaya çalışıldı, 6×2s race retry sonrası new-paid-member yok ve email adresi yok. Onboarding askıya alındı.",
+          error: "Yeni üye Zap #2 (membership-questions) ile oluşturulmaya çalışıldı, 14×2s race retry sonrası new-paid-member yok ve email adresi yok. Onboarding askıya alındı.",
           transaction_id: transaction_id,
           first_name: first_name
         }).catch(e => log.error('Admin alert failed', e));
@@ -342,7 +342,7 @@ app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
           registrationDate: date || moment().tz('Europe/Istanbul').format('YYYY-MM-DD'),
           onboardingStatus: "bekliyor"
         });
-        await notion.appendNote(member.id, "membership-questions arrived before new-paid-member (6×2s retry sonrası bulunamadı, email mevcut)");
+        await notion.appendNote(member.id, "membership-questions arrived before new-paid-member (14×2s retry sonrası bulunamadı, email mevcut)");
         log.info(`[membership-questions] Kayıt oluşturuldu (new-paid-member yok, race retry exhausted)`);
       }
     } else if (raceRetried) {
