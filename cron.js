@@ -63,6 +63,29 @@ async function retryOn429(fn, label) {
   throw lastErr;
 }
 
+// Kalıcı hata sınıflandırması: bunlar 3-strike beklenmeden doğrudan DLQ'ya gider.
+// Geçici hata (429, 5xx, timeout, network) ise mevcut error counter mantığında kalır.
+//   - WhatsApp 131xxx serisi: invalid recipient, blocked user, opted-out, vb.
+//   - Resend 4xx (429 hariç): geçersiz email, domain yasaklı, vb.
+//   - Notion validation 400'leri
+function isPermanentError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '');
+  const status = err.status || err.statusCode;
+  // Geçici hatalar — kalıcı DEĞİL
+  if (status === 429 || (status >= 500 && status < 600)) return false;
+  if (err.name === 'AbortError' || err.name === 'TimeoutError') return false;
+  if (/timeout|aborted|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.test(msg)) return false;
+  // Kalıcı sayılan kalıplar
+  if (status >= 400 && status < 500) return true;
+  if (/HTTP 4\d\d/.test(msg)) return true;
+  if (/\(#13\d{4}\)/.test(msg)) return true;        // WhatsApp Cloud 131xxx error codes
+  if (/invalid (recipient|email|phone)/i.test(msg)) return true;
+  if (/recipient.*not.*valid/i.test(msg)) return true;
+  if (/blocked|opted.?out|unsubscribed/i.test(msg)) return true;
+  return false;
+}
+
 // dual-channel retry tracking: lastError üzerinde "channel-failed-day-N" flag.
 // Format: "wa-failed-day-3" | "email-failed-day-3" | normal hata mesajı
 function parseRetryFlag(lastError) {
@@ -195,10 +218,12 @@ cron.schedule(config.cronSchedule, async () => {
         // 429 buraya kadar geldiyse retryOn429 sonrası bile başarısızlık demek →
         // sessizce skip değil, errorCount artır ve admin alert at.
         const wasRateLimit = isRateLimitErr(memberError);
+        const isPermanent = isPermanentError(memberError);
 
         // Dead-Letter Queue (DLQ)
         const newErrorCount = (member.errorCount || 0) + 1;
-        if (newErrorCount >= 3) {
+        // Kalıcı hata → 3-strike beklemeden hemen DLQ.
+        if (newErrorCount >= 3 || isPermanent) {
           await notion.updatePage(member.id, {
             errorCount: newErrorCount,
             lastError: memberError.message,
@@ -214,7 +239,8 @@ cron.schedule(config.cronSchedule, async () => {
             channel: 'whatsapp',
             error: memberError.message,
             stack: memberError.stack,
-            wasRateLimit
+            wasRateLimit,
+            permanent: isPermanent
           });
         } else {
           await notion.updatePage(member.id, {
@@ -317,10 +343,12 @@ cron.schedule(config.cronSchedule, async () => {
             log.error(`Email üye hatası (${member.firstName}): ${emailErr.message}`, emailErr.stack);
 
             const wasRateLimit = isRateLimitErr(emailErr);
+            const isPermanent = isPermanentError(emailErr);
 
             // Dead-Letter Queue (DLQ)
             const newErrorCount = (member.errorCount || 0) + 1;
-            if (newErrorCount >= 3) {
+            // Kalıcı hata → 3-strike beklemeden hemen DLQ.
+            if (newErrorCount >= 3 || isPermanent) {
               await notion.updatePage(member.id, {
                 errorCount: newErrorCount,
                 lastError: emailErr.message,
@@ -336,7 +364,8 @@ cron.schedule(config.cronSchedule, async () => {
                 channel: 'email',
                 error: emailErr.message,
                 stack: emailErr.stack,
-                wasRateLimit
+                wasRateLimit,
+                permanent: isPermanent
               });
             } else {
               await notion.updatePage(member.id, {
@@ -489,7 +518,8 @@ cron.schedule(config.cronSchedule, async () => {
           // Hem WA hem Email tamamen başarısız mı (gerçek hata)?
           if (waErr && emailErr) {
             const newErrorCount = (member.errorCount || 0) + 1;
-            if (newErrorCount >= 3) {
+            const isPermanent = isPermanentError(waErr) && isPermanentError(emailErr);
+            if (newErrorCount >= 3 || isPermanent) {
               await notion.updatePage(member.id, {
                 errorCount: newErrorCount,
                 lastError: 'Dual: Hem WA hem Email başarısız',
@@ -519,8 +549,9 @@ cron.schedule(config.cronSchedule, async () => {
             const failedChannel = waErr ? 'wa' : 'email';
             const flagStr = `${failedChannel}-failed-day-${targetDay}`;
             const newErrorCount = (member.errorCount || 0) + 1;
+            const isPermanent = isPermanentError(waErr || emailErr);
 
-            if (newErrorCount >= 3) {
+            if (newErrorCount >= 3 || isPermanent) {
               // 3 retry sonrasi hala tek kanal başarısız → DLQ
               await notion.updatePage(member.id, {
                 errorCount: newErrorCount,
@@ -566,9 +597,10 @@ cron.schedule(config.cronSchedule, async () => {
           log.error(`[CRON-DUAL] Üye hatası (${member.firstName}): ${memberError.message}`, memberError.stack);
 
           const wasRateLimit = isRateLimitErr(memberError);
+          const isPermanent = isPermanentError(memberError);
 
           const newErrorCount = (member.errorCount || 0) + 1;
-          if (newErrorCount >= 3) {
+          if (newErrorCount >= 3 || isPermanent) {
             await notion.updatePage(member.id, {
               errorCount: newErrorCount,
               lastError: memberError.message,

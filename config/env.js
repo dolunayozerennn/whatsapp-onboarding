@@ -53,7 +53,7 @@ module.exports = {
     manychatApiToken: process.env.MANYCHAT_API_TOKEN,
     groqApiKey: process.env.GROQ_API_KEY,
     resendApiKey: process.env.RESEND_API_KEY || null,
-    resendFromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',
+    resendFromEmail: process.env.RESEND_FROM_EMAIL || 'AI Factory <dolunay@dolunay.ai>',
     cronTimezone: process.env.CRON_TIMEZONE || 'Europe/Istanbul',
     cronSchedule: process.env.CRON_SCHEDULE || '0 12 * * *',
     waBusinessPhone: process.env.WA_BUSINESS_PHONE || '',

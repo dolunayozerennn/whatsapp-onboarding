@@ -853,6 +853,34 @@ app.get('/admin/get-user', adminRateLimit, adminAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// POST /admin/recover — DLQ'ya düşmüş üyeyi tekrar aktif et
+// Body: { id: notionId, status: "whatsapp"|"email"|"dual", resetStep?: number }
+// ─────────────────────────────────────────────────────────────
+app.post('/admin/recover', adminRateLimit, adminAuth, async (req, res) => {
+  try {
+    const { id, status, resetStep } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id (Notion sayfa id) zorunlu' });
+    const newStatus = ['whatsapp', 'email', 'dual'].includes(status) ? status : 'whatsapp';
+
+    const update = {
+      onboardingStatus: newStatus,
+      errorCount: 0,
+      lastError: ''
+    };
+    if (typeof resetStep === 'number' && resetStep >= 0 && resetStep <= 6) {
+      update.onboardingStep = resetStep;
+    }
+
+    await notion.updatePage(id, update);
+    log.info(`[admin/recover] Üye kurtarıldı: ${id} → status=${newStatus}, errorCount=0${update.onboardingStep !== undefined ? `, step=${update.onboardingStep}` : ''}`);
+    res.json({ ok: true, id, applied: update });
+  } catch (err) {
+    log.error(`[admin/recover] HATA: ${err.message}`, err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
   try {
     const members = await notion.getActiveOnboardingMembers();

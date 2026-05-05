@@ -8,6 +8,48 @@
 const { config } = require('../config/env');
 const log = require('../utils/logger');
 
+// Geçici hata (timeout/abort/429/5xx) durumunda inline retry.
+// Cron zaten retryOn429 ile sarmalıyor; bu sadece cron-dışı çağrılar
+// (server.js webhook fallback path'i) için güvence katmanı.
+async function sendWithRetry(fetchFn, label, attempts = 3) {
+  const delays = [1000, 3000];
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const response = await fetchFn();
+      if (response.ok) return response;
+      // 5xx veya 429 → retry; 4xx → kalıcı, hemen fırlat
+      if (response.status >= 500 || response.status === 429) {
+        const text = await response.text();
+        lastErr = new Error(`Resend HTTP ${response.status}: ${text}`);
+        lastErr.status = response.status;
+      } else {
+        const text = await response.text();
+        const err = new Error(`Resend HTTP ${response.status}: ${text}`);
+        err.status = response.status;
+        throw err;
+      }
+    } catch (err) {
+      lastErr = err;
+      // Permanent hata (4xx) → retry etme
+      if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) {
+        throw err;
+      }
+      // Timeout/abort/network → retry
+      const isTransient = err.name === 'AbortError' || err.name === 'TimeoutError'
+        || /timeout|aborted|network|ECONNRESET|ETIMEDOUT/i.test(err.message || '')
+        || err.status === 429 || (err.status >= 500 && err.status < 600);
+      if (!isTransient) throw err;
+    }
+    if (i < attempts - 1) {
+      const wait = delays[i] || 5000;
+      log.warn(`[resend:retry] ${label} — ${wait}ms backoff (deneme ${i + 1}/${attempts})`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+  throw lastErr;
+}
+
 // Fix: XSS koruması — kullanıcı adlarında <script> vb. engelleme
 function escapeHtml(str) {
   if (!str) return '';
@@ -37,26 +79,20 @@ async function sendOnboardingEmail(toEmail, firstName, dayNumber) {
   }
 
   try {
-    const response = await fetch('https://api.resend.com/emails', {
+    const response = await sendWithRetry(() => fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${config.resendApiKey}`,
         'Content-Type': 'application/json'
       },
-      // Faz 3 P1 #13: 10s timeout — Resend bazen yavaş yanıt veriyor
       signal: AbortSignal.timeout(10000),
       body: JSON.stringify({
-        from: `AI Factory <dolunay@dolunay.ai>`,
+        from: config.resendFromEmail,
         to: [toEmail],
         subject: emailContent.subject,
         html: html
       })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Resend HTTP ${response.status}: ${error}`);
-    }
+    }), `EMAIL[day${dayNumber}]`);
 
     const data = await response.json();
     log.info(`[resend] Email gönderildi: ${toEmail} — Gün ${dayNumber} (${data.id})`);
@@ -329,26 +365,20 @@ async function sendHybridFallbackEmail(toEmail, firstName, dayNumber, waBusiness
   }
 
   try {
-    const response = await fetch('https://api.resend.com/emails', {
+    const response = await sendWithRetry(() => fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${config.resendApiKey}`,
         'Content-Type': 'application/json'
       },
-      // Faz 3 P1 #13: 10s timeout — Resend bazen yavaş yanıt veriyor
       signal: AbortSignal.timeout(10000),
       body: JSON.stringify({
-        from: `AI Factory <dolunay@dolunay.ai>`,
+        from: config.resendFromEmail,
         to: [toEmail],
         subject: subject,
         html: html
       })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Resend HTTP ${response.status}: ${error}`);
-    }
+    }), `FALLBACK[day${dayNumber}]`);
 
     const data = await response.json();
     log.info(`[resend] Hibrit fallback email gönderildi: ${toEmail} — Gün ${dayNumber} (${data.id})`);
@@ -369,11 +399,14 @@ async function sendAdminAlertEmail(subject, errorDetails) {
     return null;
   }
 
+  // KVKK: phone/email/token alanlarını maskele (logger ile aynı redaction layer).
+  const safeDetails = log._redactDeep ? log._redactDeep(errorDetails) : errorDetails;
+
   const html = `
     <h2>🚨 AI Factory Sistem Uyarısı</h2>
     <p><strong>Konu:</strong> ${escapeHtml(subject)}</p>
     <pre style="background: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto;">
-${escapeHtml(JSON.stringify(errorDetails, null, 2))}
+${escapeHtml(JSON.stringify(safeDetails, null, 2))}
     </pre>
     <p><small>Zaman: ${new Date().toISOString()}</small></p>
   `;
@@ -388,7 +421,7 @@ ${escapeHtml(JSON.stringify(errorDetails, null, 2))}
       // Faz 3 P1 #13: 10s timeout — Resend bazen yavaş yanıt veriyor
       signal: AbortSignal.timeout(10000),
       body: JSON.stringify({
-        from: `AI Factory Alerts <dolunay@dolunay.ai>`,
+        from: config.resendFromEmail,
         to: ['ozerendolunay@gmail.com'],
         subject: `[🚨 UYARI] ${subject}`,
         html: html
