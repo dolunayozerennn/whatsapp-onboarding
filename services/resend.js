@@ -315,18 +315,17 @@ async function sendHybridFallbackEmail(toEmail, firstName, dayNumber, waBusiness
   const emailContent = getEmailContent(firstName, dayNumber);
   let html = emailContent.html;
 
-  // Subject: orijinalin önüne fallback prefix ekle
-  let subject = `Sana WhatsApp'tan ulaşamadık – ${emailContent.subject}`;
-
-  // waBusinessPhone doluysa → WA CTA bloğunu enjekte et
-  if (waBusinessPhone) {
+  // WA CTA sadece Gün 0 (hoş geldin) mailinde gösterilir.
+  // Gün 1-6'da seri zaten email üzerinden ilerliyor; "WhatsApp'a geç" demek anlamsız.
+  let subject;
+  if (dayNumber === 0 && waBusinessPhone) {
     html = html.replace('<!-- WA_CTA_PLACEHOLDER -->', buildWaCta(waBusinessPhone));
-    log.info(`[resend] Hibrit fallback: WA CTA enjekte edildi (${waBusinessPhone})`);
+    subject = `Sana WhatsApp'tan ulaşamadık – ${emailContent.subject}`;
+    log.info(`[resend] Hibrit fallback: Gün 0 WA CTA enjekte edildi (${waBusinessPhone})`);
   } else {
-    // waBusinessPhone boşsa → CTA ekleme, normal email gönder (graceful degradation)
     html = html.replace('<!-- WA_CTA_PLACEHOLDER -->', '');
-    subject = emailContent.subject; // prefix de ekleme
-    log.info(`[resend] Hibrit fallback: WA telefon yok, normal email gönderiliyor`);
+    subject = emailContent.subject;
+    log.info(`[resend] Hibrit fallback: Gün ${dayNumber} — WA CTA atlandı, normal email`);
   }
 
   try {
