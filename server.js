@@ -154,6 +154,8 @@ setInterval(() => {
 
 // ─────────────────────────────────────────────────────────────
 // POST /webhook/new-paid-member — Zapier Zap #1
+// Async pattern: validate → 202 Accepted → background work.
+// Zapier asla Notion/ManyChat çağrılarını beklemek zorunda kalmaz.
 // ─────────────────────────────────────────────────────────────
 app.post('/webhook/new-paid-member', webhookAuth, async (req, res) => {
   const { transaction_id, first_name, last_name, email, date } = req.body;
@@ -172,8 +174,12 @@ app.post('/webhook/new-paid-member', webhookAuth, async (req, res) => {
     return res.status(200).json({ status: 'duplicate', source: 'in-memory' });
   }
 
-  try {
-    const cleanEmail = (email && email !== 'No data' && email.includes('@')) ? email : null;
+  // Zapier'a anında 202 dön — Notion ne kadar yavaşlarsa yavaşlasın webhook akışı kırılmaz.
+  res.status(202).json({ accepted: true });
+
+  setImmediate(async () => {
+    try {
+      const cleanEmail = (email && email !== 'No data' && email.includes('@')) ? email : null;
 
     // Notion'da var mı kontrol et — Notion = source of truth
     const existing = await notion.findByTransactionId(transaction_id);
@@ -232,21 +238,21 @@ app.post('/webhook/new-paid-member', webhookAuth, async (req, res) => {
       log.info(`[new-paid-member] Yeni kayıt: ${first_name} ${last_name} (${cleanEmail})`);
     }
 
-    res.status(200).json({ success: true });
-  } catch (error) {
-    log.error(`[new-paid-member] HATA: ${error.message}`, error.stack);
-    
-    // Sistem Hatası E-postası (Sadece beklenmedik çökmelerde)
-    await resend.sendAdminAlertEmail(`Webhook Hatası: new-paid-member`, {
-      error: error.message,
-      stack: error.stack,
-      transaction_id: transaction_id
-    }).catch(e => log.error('Admin alert failed', e));
+      log.info(`[new-paid-member] Background tamamlandı: ${transaction_id}`);
+    } catch (error) {
+      log.error(`[new-paid-member] HATA: ${error.message}`, error.stack);
 
-    res.status(500).json({ error: error.message });
-  } finally {
-    releaseLock(lockKey);
-  }
+      // Sistem Hatası E-postası (Sadece beklenmedik çökmelerde)
+      await resend.sendAdminAlertEmail(`Webhook Hatası: new-paid-member`, {
+        error: error.message,
+        stack: error.stack,
+        transaction_id: transaction_id,
+        payload: req.body
+      }).catch(e => log.error('Admin alert failed', e));
+    } finally {
+      releaseLock(lockKey);
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -273,104 +279,81 @@ app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
     return res.status(200).json({ status: 'duplicate', source: 'in-memory' });
   }
 
-  try {
-    // 0. Eski üye kontrolü (E-mail veya İsim üzerinden)
-    const cleanEmail = (email && email !== 'No data' && email.includes('@')) ? email : null;
-    if (cleanEmail) {
-      const existingByEmail = await notion.findByEmail(cleanEmail.trim());
-      if (existingByEmail && existingByEmail.onboardingStatus === 'atlandı') {
-        log.info(`[membership-questions] Eski üye atlanıyor (email eşleşmesi): ${cleanEmail}`);
-        return res.status(200).json({ success: true, skipped: true, reason: 'eski_uye' });
-      }
-    } else {
-      // İsim üzerinden eski üye eşleşmesi (findByName) kaldırıldı.
-      // transaction_id ve email bazlı kontrol dedup için yeterli.
-    }
+  // Zapier'a anında 202 dön — eskiden 28s race retry + 15s Notion timeout, Zapier'ın
+  // 30s limitini aşıp "Notion API timed out" hatası veriyordu (Semir Umay vakası 2026-05-05).
+  res.status(202).json({ accepted: true });
 
-    // 1. Telefon numarasını Groq LLM ile valide et
-    let phoneResult;
-    if (!phoneInput) {
-      phoneResult = { valid: false, reason: "Numara girilmedi (Boş alan)", confidence: 0 };
-    } else {
-      phoneResult = await validatePhone(phoneInput);
-    }
-    log.info(`[membership-questions] Validasyon sonucu: ${JSON.stringify(phoneResult)}`);
-
-    // 2. Notion'da kaydı bul.
-    // Faz 3 P1 #15: Zapier Zap #2 bazen Zap #1'den önce ulaşıyor (sıra garantisi yok).
-    // Doğrudan placeholder yaratmak yerine 14 retry × 2s ile new-paid-member'ı bekle.
-    // Toplam ~28s; Zapier webhook timeout 30s — güvenli marj.
-    let member = await notion.findByTransactionId(transaction_id);
-    let raceRetried = false;
-    if (!member) {
-      for (let attempt = 1; attempt <= 14; attempt++) {
-        await new Promise(r => setTimeout(r, 2000));
-        member = await notion.findByTransactionId(transaction_id);
-        if (member) {
-          log.info(`[membership-questions] Race retry başarılı (deneme ${attempt}/14): ${transaction_id}`);
-          raceRetried = true;
-          break;
+  setImmediate(async () => {
+    try {
+      // 0. Eski üye kontrolü (E-mail üzerinden)
+      const cleanEmail = (email && email !== 'No data' && email.includes('@')) ? email : null;
+      if (cleanEmail) {
+        const existingByEmail = await notion.findByEmail(cleanEmail.trim());
+        if (existingByEmail && existingByEmail.onboardingStatus === 'atlandı') {
+          log.info(`[membership-questions] Eski üye atlanıyor (email eşleşmesi): ${cleanEmail}`);
+          return;
         }
-        log.info(`[membership-questions] Race retry deneme ${attempt}/14 boş döndü: ${transaction_id}`);
       }
-    }
 
-    if (!member) {
-      // 6s sonra hala yok — placeholder yarat ama observability için açıkça flagle.
-      if (!cleanEmail) {
-        member = await notion.createMember({
-          firstName: first_name,
-          lastName: last_name || '',
-          transactionId: transaction_id,
-          registrationDate: date || moment().tz('Europe/Istanbul').format('YYYY-MM-DD'),
-          onboardingStatus: "error"
-        });
-        await notion.appendNote(member.id, "[HATA] membership-questions arrived before new-paid-member (14×2s retry sonrası bulunamadı), email yok.");
-        log.warn(`[membership-questions] Yeni kayıt "error" statüsünde oluşturuldu (Race + Email eksik)`);
-
-        await resend.sendAdminAlertEmail(`Zombie Üye Tespit Edildi (Zap #2)`, {
-          error: "Yeni üye Zap #2 (membership-questions) ile oluşturulmaya çalışıldı, 14×2s race retry sonrası new-paid-member yok ve email adresi yok. Onboarding askıya alındı.",
-          transaction_id: transaction_id,
-          first_name: first_name
-        }).catch(e => log.error('Admin alert failed', e));
+      // 1. Telefon numarasını Groq LLM ile valide et
+      let phoneResult;
+      if (!phoneInput) {
+        phoneResult = { valid: false, reason: "Numara girilmedi (Boş alan)", confidence: 0 };
       } else {
+        phoneResult = await validatePhone(phoneInput);
+      }
+      log.info(`[membership-questions] Validasyon sonucu: ${JSON.stringify(phoneResult)}`);
+
+      // 2. Notion'da kaydı bul (placeholder-first, idempotent).
+      // Eskiden 14×2s retry vardı — kaldırıldı. Background'da olduğumuz için
+      // Zap #1 hâlâ gelmediyse direkt full-data placeholder yaratıyoruz; Zap #1
+      // sonradan gelirse aynı transaction_id'yi bulup mevcut kaydı update edecek.
+      let member = await notion.findByTransactionId(transaction_id);
+
+      if (!member) {
+        const placeholderStatus = cleanEmail ? "bekliyor" : "error";
         member = await notion.createMember({
           firstName: first_name,
           lastName: last_name || '',
-          email: cleanEmail,
+          email: cleanEmail || '',
           transactionId: transaction_id,
           registrationDate: date || moment().tz('Europe/Istanbul').format('YYYY-MM-DD'),
-          onboardingStatus: "bekliyor"
+          onboardingStatus: placeholderStatus
         });
-        await notion.appendNote(member.id, "membership-questions arrived before new-paid-member (14×2s retry sonrası bulunamadı, email mevcut)");
-        log.info(`[membership-questions] Kayıt oluşturuldu (new-paid-member yok, race retry exhausted)`);
-      }
-    } else if (raceRetried) {
-      await notion.appendNote(member.id, "[RACE] membership-questions Zap #1'den önce geldi, retry ile yakalandı");
-    }
+        await notion.appendNote(member.id, `[PLACEHOLDER] Zap #2 önce geldi (Zap #1 yok), full-data placeholder yaratıldı (status=${placeholderStatus})`);
+        log.info(`[membership-questions] Placeholder kayıt yaratıldı (status=${placeholderStatus}): ${transaction_id}`);
 
-    // 3. Deduplication kontrolü
-    const skipStatuses = ['whatsapp', 'email', 'dual', 'tamamlandı', 'error'];
-    if (skipStatuses.includes(member.onboardingStatus)) {
-      log.info(`[membership-questions] Zaten onboarding'de veya tamamlanmış, atlanıyor: ${transaction_id}`);
-      return res.status(200).json({ success: true, skipped: true });
-    }
-
-    if (phoneResult.valid && phoneResult.confidence >= 0.5) {
-      // 4a. Telefon numarası ile deduplication
-      const existingPhone = await notion.findByPhone(phoneResult.normalized);
-      if (existingPhone && existingPhone.id !== member.id) {
-        if (['tamamlandı', 'error', 'atlandı'].includes(existingPhone.onboardingStatus)) {
-          log.info(`[DEDUP] ${existingPhone.firstName} tekrar abone, telefon deduplication atlanıyor, yeni onboarding başlatılıyor`);
-        } else {
-          log.warn(`[membership-questions] Bu numara başka aktif hesapta kayıtlı: ${phoneResult.normalized}`);
-          await notion.updatePage(member.id, {
-            onboardingStatus: "atlandı"
-          });
-          await notion.appendNote(member.id, `Telefon ${phoneResult.normalized} başka aktif hesapta mevcut — dedup`);
-          return res.status(200).json({ success: true, skipped: true });
+        if (!cleanEmail) {
+          await resend.sendAdminAlertEmail(`Zombie Üye Tespit Edildi (Zap #2 + email yok)`, {
+            error: "membership-questions geldi, new-paid-member yok ve email adresi yok. Onboarding askıya alındı.",
+            transaction_id: transaction_id,
+            first_name: first_name
+          }).catch(e => log.error('Admin alert failed', e));
         }
       }
+
+      // 3. Deduplication kontrolü
+      const skipStatuses = ['whatsapp', 'email', 'dual', 'tamamlandı', 'error'];
+      if (skipStatuses.includes(member.onboardingStatus)) {
+        log.info(`[membership-questions] Zaten onboarding'de veya tamamlanmış, atlanıyor: ${transaction_id}`);
+        return;
+      }
+
+      if (phoneResult.valid && phoneResult.confidence >= 0.5) {
+        // 4a. Telefon numarası ile deduplication
+        const existingPhone = await notion.findByPhone(phoneResult.normalized);
+        if (existingPhone && existingPhone.id !== member.id) {
+          if (['tamamlandı', 'error', 'atlandı'].includes(existingPhone.onboardingStatus)) {
+            log.info(`[DEDUP] ${existingPhone.firstName} tekrar abone, telefon deduplication atlanıyor, yeni onboarding başlatılıyor`);
+          } else {
+            log.warn(`[membership-questions] Bu numara başka aktif hesapta kayıtlı: ${phoneResult.normalized}`);
+            await notion.updatePage(member.id, {
+              onboardingStatus: "atlandı"
+            });
+            await notion.appendNote(member.id, `Telefon ${phoneResult.normalized} başka aktif hesapta mevcut — dedup`);
+            return;
+          }
+        }
 
       // 5. ManyChat'te subscriber oluştur + Gün 0 flow'unu tetikle.
       // WA_ID_INVALID: numarada WhatsApp hesabı yok → kullanıcıyı email akışına düşür (sessiz kayıp engeli).
@@ -481,20 +464,20 @@ app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
       }
     }
 
-    res.status(200).json({ success: true });
-  } catch (error) {
-    log.error(`[membership-questions] HATA: ${error.message}`, error.stack);
-    
-    await resend.sendAdminAlertEmail(`Webhook Hatası: membership-questions`, {
-      error: error.message,
-      stack: error.stack,
-      transaction_id: transaction_id
-    }).catch(e => log.error('Admin alert failed', e));
+      log.info(`[membership-questions] Background tamamlandı: ${transaction_id}`);
+    } catch (error) {
+      log.error(`[membership-questions] HATA: ${error.message}`, error.stack);
 
-    res.status(500).json({ error: error.message });
-  } finally {
-    releaseLock(lockKey);
-  }
+      await resend.sendAdminAlertEmail(`Webhook Hatası: membership-questions`, {
+        error: error.message,
+        stack: error.stack,
+        transaction_id: transaction_id,
+        payload: req.body
+      }).catch(e => log.error('Admin alert failed', e));
+    } finally {
+      releaseLock(lockKey);
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────

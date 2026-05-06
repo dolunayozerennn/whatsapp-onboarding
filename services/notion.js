@@ -9,28 +9,39 @@ const { config } = require('../config/env');
 const log = require('../utils/logger');
 const { toE164 } = require('../utils/phone');
 
-// Faz 3 P1 #13: Notion SDK'nın internal fetch'ine timeout ver. SDK zaten
-// kendi içinde retry yapıyor, ama tek istek için üst sınır koymak da gerekli.
+// Notion SDK timeout: tek bir istek için üst sınır. 8s'i geçen her istek
+// retry tetikler — webhook artık background'da çalıştığı için Zapier'i bloklamaz.
 const notion = new Client({
   auth: config.notionApiKey,
-  timeoutMs: 15000
+  timeoutMs: 8000
 });
 const DATABASE_ID = config.notionDatabaseId;
 
-// Faz 3 P1 #14: Cron iterasyonunda max çekilecek üye sayısı.
-// 100 page_size × 10 sayfa = 1000 üye/cron. Bu cap'e gelirsek scale gerek var.
 const MAX_PAGES_PER_QUERY = 10;
 const PAGE_SIZE = 100;
+
+function isTransientNotionError(err) {
+  if (!err) return false;
+  if (err.status === 429) return true;
+  if (typeof err.status === 'number' && err.status >= 500) return true;
+  const code = err.code || err.cause?.code;
+  if (code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'UND_ERR_HEADERS_TIMEOUT') return true;
+  const msg = String(err.message || '').toLowerCase();
+  if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('socket hang up') || msg.includes('fetch failed')) return true;
+  return false;
+}
 
 async function notionRequest(fn, maxRetries = 2) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      if (err?.status === 429 && attempt < maxRetries) {
-        const waitMs = (err?.headers?.['retry-after'] || 1) * 1000;
-        log.warn(`[NOTION] Rate limited, ${waitMs}ms bekleniyor...`);
-        await new Promise(r => setTimeout(r, waitMs));
+      const transient = isTransientNotionError(err);
+      if (transient && attempt < maxRetries) {
+        const headerWait = err?.status === 429 ? (Number(err?.headers?.['retry-after']) || 1) * 1000 : 0;
+        const backoff = headerWait || (1000 * Math.pow(2, attempt));
+        log.warn(`[NOTION] Transient error (status=${err.status || 'n/a'}, code=${err.code || 'n/a'}, msg=${err.message}), ${backoff}ms sonra retry (${attempt + 1}/${maxRetries})`);
+        await new Promise(r => setTimeout(r, backoff));
         continue;
       }
       throw err;
