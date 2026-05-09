@@ -87,6 +87,30 @@ process.on('SIGTERM', () => initiateShutdown('SIGTERM'));
 process.on('SIGINT', () => initiateShutdown('SIGINT'));
 
 // ─────────────────────────────────────────────────────────────
+// Process-Level Safety Net — Unhandled Rejection / Uncaught Exception
+// ─────────────────────────────────────────────────────────────
+// server.js, webhook handler'larında setImmediate(async () => {...}) ile
+// background işler tetikliyor (new-paid-member, membership-questions).
+// İçerideki try/catch'i atlayan herhangi bir reject (örn. try'dan önce
+// senkron throw, finally içinden throw, ya da unutulmuş .catch()) Node'un
+// process'i öldürmesine neden olur — webhook sessizce ölür.
+// Bu listener'lar log basıp graceful shutdown'a yönlendirir.
+process.on('unhandledRejection', (reason) => {
+  log.error('UNHANDLED_REJECTION', {
+    reason: reason instanceof Error ? { message: reason.message, stack: reason.stack } : String(reason)
+  });
+});
+
+process.on('uncaughtException', (err) => {
+  log.error('UNCAUGHT_EXCEPTION', {
+    message: err?.message,
+    stack: err?.stack
+  });
+  // Mevcut graceful shutdown'a yönlendir — Railway temiz restart eder.
+  initiateShutdown('uncaughtException');
+});
+
+// ─────────────────────────────────────────────────────────────
 // Security Middleware — Webhook & Admin Auth
 // ─────────────────────────────────────────────────────────────
 // WEBHOOK_SECRET artık zorunlu — config/env.js içindeki validateEnv()
