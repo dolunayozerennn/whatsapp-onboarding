@@ -76,6 +76,8 @@ function isPermanentError(err) {
   if (status === 429 || (status >= 500 && status < 600)) return false;
   if (err.name === 'AbortError' || err.name === 'TimeoutError') return false;
   if (/timeout|aborted|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.test(msg)) return false;
+  // ManyChat wa_id validation: numarada WhatsApp yok — kalıcı, retry beyhude.
+  if (err.code === 'WA_ID_INVALID') return true;
   // Kalıcı sayılan kalıplar
   if (status >= 400 && status < 500) return true;
   if (/HTTP 4\d\d/.test(msg)) return true;

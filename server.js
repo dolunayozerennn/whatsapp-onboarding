@@ -555,12 +555,22 @@ app.post('/webhook/wa-optin', webhookAuth, async (req, res) => {
       const nextFlow = ONBOARDING_FLOWS[nextStep];
 
       if (nextFlow && nextFlow.flow_id) {
-        await manychat.ensureSubscriberAndSendFlow(
-          phone,
-          first_name || member.firstName,
-          nextFlow.flow_id
-        );
-        log.info(`[wa-optin] ManyChat flow tetiklendi: Step ${nextStep} → ${nextFlow.flow_id}`);
+        try {
+          await manychat.ensureSubscriberAndSendFlow(
+            phone,
+            first_name || member.firstName,
+            nextFlow.flow_id
+          );
+          log.info(`[wa-optin] ManyChat flow tetiklendi: Step ${nextStep} → ${nextFlow.flow_id}`);
+        } catch (waErr) {
+          // WA_ID_INVALID: numarada WhatsApp hesabı yok → email akışında bırak, hata değil.
+          if (waErr.code === manychat.WA_ID_INVALID) {
+            log.warn(`[wa-optin] WhatsApp hesabı bulunamadı (${phone}), email akışında bırakılıyor: ${member.firstName}`);
+            await notion.appendNote(member.id, `[WA-OPTIN] WhatsApp hesabı bulunamadı (wa_id validation), email akışında devam ediliyor. Telefon: ${phone}`);
+            return res.status(200).json({ success: true, skipped: true, reason: 'wa_id_invalid' });
+          }
+          throw waErr;
+        }
       }
 
       await notion.updatePage(member.id, {
