@@ -545,6 +545,22 @@ cron.schedule(config.cronSchedule, async () => {
             continue;
           }
 
+          // WA_ID_INVALID özel durum: numarada WhatsApp yok → kullanıcıyı email-only'ye düşür.
+          // Email başarılıysa onboarding'i durdurmak yerine email kanalında devam ettir.
+          if (waErr && !emailErr && emailSentOk && waErr.code === 'WA_ID_INVALID') {
+            await notion.updatePage(member.id, {
+              onboardingStep: targetDay,
+              onboardingStatus: 'email',
+              onboardingChannel: 'email',
+              errorCount: 0,
+              lastError: ''
+            });
+            await notion.appendNote(member.id, `[CRON-DUAL] WhatsApp hesabı bulunamadı (wa_id), email-only akışına alındı. Day ${targetDay}.`);
+            log.info(`[CRON-DUAL] WA_ID_INVALID → email-only: ${member.firstName} day ${targetDay}`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            continue;
+          }
+
           // Bir kanal başarısız oldu → step ilerletme, retry flag yaz.
           // (P1 #12: Sadece TÜM yapılandırılmış kanallar başarılı olduğunda step++.)
           if (waErr || emailErr) {
