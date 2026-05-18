@@ -208,6 +208,11 @@ async function createSubscriber(phoneNumber, firstName) {
     throw new Error(`ManyChat API Hatası: ${errReason}`);
 
   } catch (error) {
+    // WA_ID_INVALID beklenen bir durum (numarada WhatsApp yok) — caller email fallback'e düşürür.
+    // ERROR olarak loglamıyoruz, watchdog/admin alert tetiklemesin.
+    if (error.code === 'WA_ID_INVALID') {
+      throw error;
+    }
     log.error(`[manychat:api] ❌ createSubscriber ağ hatası: ${error.message}`, error);
     throw error;
   }

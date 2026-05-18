@@ -215,6 +215,22 @@ cron.schedule(config.cronSchedule, async () => {
         await new Promise(resolve => setTimeout(resolve, 2000));
 
       } catch (memberError) {
+        // WA_ID_INVALID + email mevcut → sessizce email-only kanalına geçir, alarm yok.
+        // (server.js webhook'unda da aynı davranış — bu, WA-only loop'ta tekrar sahnede.)
+        const memberHasEmail = member.email && typeof member.email === 'string' && member.email.includes('@');
+        if (memberError && memberError.code === 'WA_ID_INVALID' && memberHasEmail) {
+          log.info(`[CRON:wa] WA_ID_INVALID + email mevcut → email-only akışına alındı (sessiz): ${member.firstName} (${member.phone})`);
+          await notion.updatePage(member.id, {
+            onboardingStatus: 'email',
+            onboardingChannel: 'email',
+            errorCount: 0,
+            lastError: ''
+          });
+          await notion.appendNote(member.id, `[CRON:wa] WhatsApp hesabı bulunamadı (wa_id), email-only akışına alındı.`);
+          skipped++;
+          continue;
+        }
+
         log.error(`Üye hatası (${member.firstName}): ${memberError.message}`, memberError.stack);
 
         // 429 buraya kadar geldiyse retryOn429 sonrası bile başarısızlık demek →
