@@ -210,8 +210,11 @@ app.post('/webhook/new-paid-member', webhookAuth, async (req, res) => {
 
     // Idempotent erken-çıkış: kayıt zaten "tamamlandı" / "atlandı" ise hiçbir şey yapma
     if (existing && ['tamamlandı', 'atlandı'].includes(existing.onboardingStatus)) {
+      // 202 yanıtı setImmediate'den önce gönderildi; burada tekrar res.json()
+      // çağırmak ERR_HTTP_HEADERS_SENT fırlatıp sahte "Webhook Hatası" admin
+      // alarmı tetikliyordu. Idempotent skip'te sadece işlemi durdur.
       log.info(`[new-paid-member] Idempotent skip (status=${existing.onboardingStatus}): ${transaction_id}`);
-      return res.status(200).json({ status: 'duplicate', source: 'notion' });
+      return;
     }
 
     if (existing) {
