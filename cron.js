@@ -77,7 +77,7 @@ function isPermanentError(err) {
   if (err.name === 'AbortError' || err.name === 'TimeoutError') return false;
   if (/timeout|aborted|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.test(msg)) return false;
   // ManyChat wa_id validation: numarada WhatsApp yok — kalıcı, retry beyhude.
-  if (err.code === 'WA_ID_INVALID') return true;
+  if (err.code === 'WA_ID_INVALID' || err.code === 'WA_UNREACHABLE') return true;
   // Kalıcı sayılan kalıplar
   if (status >= 400 && status < 500) return true;
   if (/HTTP 4\d\d/.test(msg)) return true;
@@ -563,7 +563,7 @@ cron.schedule(config.cronSchedule, async () => {
 
           // WA_ID_INVALID özel durum: numarada WhatsApp yok → kullanıcıyı email-only'ye düşür.
           // Email başarılıysa onboarding'i durdurmak yerine email kanalında devam ettir.
-          if (waErr && !emailErr && emailSentOk && waErr.code === 'WA_ID_INVALID') {
+          if (waErr && !emailErr && emailSentOk && (waErr.code === 'WA_ID_INVALID' || waErr.code === 'WA_UNREACHABLE')) {
             await notion.updatePage(member.id, {
               onboardingStep: targetDay,
               onboardingStatus: 'email',

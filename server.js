@@ -392,10 +392,13 @@ app.post('/webhook/membership-questions', webhookAuth, async (req, res) => {
           ONBOARDING_FLOWS[0].flow_id
         );
       } catch (waErr) {
-        if (waErr.code === manychat.WA_ID_INVALID) {
+        if (waErr.code === manychat.WA_ID_INVALID || waErr.code === manychat.WA_UNREACHABLE) {
           waSucceeded = false;
-          log.warn(`[membership-questions] WhatsApp hesabı bulunamadı (${phoneResult.normalized}), email fallback'e düşülüyor: ${first_name}`);
-          await notion.appendNote(member.id, `WhatsApp hesabı bulunamadı (wa_id validation), email akışına alındı. Telefon: ${phoneResult.normalized}`);
+          const sebep = waErr.code === manychat.WA_UNREACHABLE
+            ? `WhatsApp ulaşılamadı (Meta engeli, ör. ABD numarası), email akışına alındı. Telefon: ${phoneResult.normalized}`
+            : `WhatsApp hesabı bulunamadı (wa_id validation), email akışına alındı. Telefon: ${phoneResult.normalized}`;
+          log.warn(`[membership-questions] WhatsApp gönderilemedi (${waErr.code}) → email fallback: ${first_name}`);
+          await notion.appendNote(member.id, sebep);
         } else {
           throw waErr;
         }

@@ -474,6 +474,20 @@ async function sendFlow(subscriberId, flowId) {
   log.debug(`[manychat:api] sendFlow yanıtı.`, data);
 
   if (data.status !== 'success') {
+    // WhatsApp deliverability engeli: Meta bu alıcıya template gönderimini reddetti.
+    // En sık: code 3050 — ABD numaralarında marketing template yasak (utility gerek).
+    // Bu beklenen bir "ulaşılamaz" durumudur (Meta politikası), gerçek sistem hatası değil.
+    // WA_ID_INVALID ile aynı sınıfta tipli fırlatıyoruz → caller email fallback'e düşürür.
+    const metaCode = data.code;
+    const metaMsg = String(data.message || '').toLowerCase();
+    const unreachable = metaCode === 3050 || /marketing template|utility template/.test(metaMsg);
+    if (unreachable) {
+      log.warn(`[manychat:api] WhatsApp ulaşılamaz (Meta engeli, code=${metaCode}) → email fallback önerilir.`);
+      const waErr = new Error(`WhatsApp template gönderilemedi (Meta code ${metaCode}): ${data.message || ''}`);
+      waErr.code = 'WA_UNREACHABLE';
+      waErr.metaCode = metaCode;
+      throw waErr;
+    }
     log.error(`[manychat:api] ❌ sendFlow başarısız.`, data);
     throw new Error(`sendFlow hatası: ${JSON.stringify(data)}`);
   }
@@ -533,5 +547,6 @@ module.exports = {
   setCustomFields,
   sendFlow,
   validateAllFlows,
-  WA_ID_INVALID: 'WA_ID_INVALID'
+  WA_ID_INVALID: 'WA_ID_INVALID',
+  WA_UNREACHABLE: 'WA_UNREACHABLE'
 };
