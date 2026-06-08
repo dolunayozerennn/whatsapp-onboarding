@@ -1,0 +1,1650 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Onboarding — Canlı Demo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0b0e14;
+            --bg-grid: #1a1f2c;
+            --panel-bg: #11151c;
+            --panel-bg-2: #161b25;
+            --panel-border: #232a39;
+            --text-main: #ffffff;
+            --text-muted: #8b9eb5;
+            --text-dim: #5a6878;
+            --color-success: #10b981;
+            --color-warn: #f59e0b;
+            --color-info: #00e5ff;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0; padding: 0;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-image: radial-gradient(var(--bg-grid) 1px, transparent 1px);
+            background-size: 22px 22px;
+        }
+
+        /* ───── Top mini header ───── */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 28px;
+            border-bottom: 1px solid var(--panel-border);
+            background: linear-gradient(to bottom, rgba(11,14,20,0.95), rgba(11,14,20,0.7));
+            backdrop-filter: blur(8px);
+            z-index: 50;
+        }
+        .topbar h1 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 0;
+            letter-spacing: -0.3px;
+        }
+        .topbar .subtitle {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            font-weight: 300;
+            margin-top: 2px;
+        }
+        .topbar .live-pill {
+            display: flex; align-items: center; gap: 8px;
+            background: rgba(16,185,129,0.12);
+            color: var(--color-success);
+            padding: 6px 12px; border-radius: 20px;
+            font-size: 0.78rem; font-weight: 500;
+            border: 1px solid rgba(16,185,129,0.25);
+        }
+        .live-pill .dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--color-success);
+            box-shadow: 0 0 8px var(--color-success);
+            animation: livePulse 1.4s infinite;
+        }
+        @keyframes livePulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+
+        /* ───── Demo windows row (top half) ───── */
+        .demo-row {
+            display: flex;
+            gap: 14px;
+            padding: 18px 28px 10px 28px;
+            height: 52%;
+            min-height: 320px;
+        }
+
+        .demo-window {
+            flex: 1;
+            min-width: 0;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+            overflow: hidden;
+            position: relative;
+            transition: border-color 0.4s ease, box-shadow 0.4s ease;
+        }
+        .demo-window.focus {
+            border-color: var(--theme-color, #00e5ff);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.55), 0 0 0 1px var(--theme-color, #00e5ff), 0 0 30px -8px var(--theme-color, #00e5ff);
+        }
+
+        .window-titlebar {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 14px;
+            background: linear-gradient(to bottom, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+            border-bottom: 1px solid var(--panel-border);
+            user-select: none;
+        }
+        .traffic-lights { display: flex; gap: 6px; }
+        .traffic-lights span {
+            width: 11px; height: 11px; border-radius: 50%;
+            display: block;
+        }
+        .traffic-lights span:nth-child(1) { background: #ff5f57; }
+        .traffic-lights span:nth-child(2) { background: #ffbd2e; }
+        .traffic-lights span:nth-child(3) { background: #28c840; }
+        .window-platform {
+            display: flex; align-items: center; gap: 8px;
+            padding-left: 6px;
+        }
+        .window-platform-logo {
+            width: 18px; height: 18px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .window-platform-logo svg { width: 100%; height: 100%; display: block; }
+        .window-title {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            flex: 1;
+            margin-right: 50px;
+        }
+        .window-titlebar.no-platform .window-title { text-align: center; }
+        .window-status {
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.04);
+            color: var(--text-dim);
+        }
+        .window-status.busy {
+            background: rgba(245,158,11,0.15);
+            color: var(--color-warn);
+        }
+        .window-status.busy::before {
+            content: '●'; margin-right: 5px;
+            animation: livePulse 1s infinite;
+        }
+        .window-status.done {
+            background: rgba(16,185,129,0.15);
+            color: var(--color-success);
+        }
+
+        .window-body {
+            flex: 1;
+            overflow: auto;
+            position: relative;
+        }
+
+        /* Wait overlay */
+        .wait-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(11,14,20,0.6);
+            backdrop-filter: blur(2px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 14px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 10;
+        }
+        .wait-overlay.show { opacity: 1; }
+        .wait-spinner {
+            width: 40px; height: 40px;
+            border: 3px solid var(--panel-border);
+            border-top-color: var(--color-info);
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .wait-label {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            font-weight: 400;
+            letter-spacing: 0.3px;
+        }
+        .wait-dots::after {
+            content: '';
+            animation: dots 1.4s steps(4, end) infinite;
+        }
+        @keyframes dots { 0%{content:'';} 25%{content:'.';} 50%{content:'..';} 75%{content:'...';} }
+
+        /* ───── Bottom flow canvas ───── */
+        .flow-canvas {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 0 50vw;
+            scroll-behavior: smooth;
+            cursor: grab;
+            border-top: 1px solid var(--panel-border);
+            background: rgba(0,0,0,0.15);
+        }
+        .flow-canvas:active { cursor: grabbing; }
+
+        .flow-container {
+            display: flex; flex-direction: row; align-items: center;
+            min-width: max-content;
+        }
+
+        .node-wrapper {
+            display: flex; align-items: center;
+            opacity: 0.35;
+            transform: scale(0.92);
+            filter: grayscale(0.6);
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .node-wrapper.active { opacity: 1; transform: scale(1.04); filter: grayscale(0); }
+        .node-wrapper.completed { opacity: 0.85; transform: scale(1); filter: grayscale(0); }
+
+        .node {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            width: 230px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .node-wrapper.active .node {
+            border-color: var(--theme-color);
+            box-shadow: 0 0 25px rgba(0,0,0,0.5), inset 0 0 0 1px var(--theme-color), 0 0 30px -10px var(--theme-color);
+        }
+        .node-header {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--panel-border);
+            background: rgba(255,255,255,0.02);
+            border-radius: 10px 10px 0 0;
+        }
+        .node-icon-wrapper {
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.25);
+            border: 1px solid var(--theme-color);
+            color: var(--theme-color);
+            box-shadow: 0 0 8px var(--theme-color);
+            font-size: 1rem;
+        }
+        .node-title { font-size: 0.88rem; font-weight: 500; margin: 0; }
+        .node-subtitle { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
+        .node-body { padding: 12px; }
+        .node-desc { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0; line-height: 1.4; }
+
+        .sub-steps { display: flex; flex-direction: column; gap: 6px; }
+        .sub-step {
+            font-size: 0.74rem;
+            background: rgba(0,0,0,0.25);
+            padding: 6px 10px; border-radius: 4px;
+            display: flex; align-items: center; gap: 8px;
+            color: var(--text-muted);
+            opacity: 0; transform: translateX(-8px);
+            transition: all 0.3s ease;
+            border-left: 2px solid transparent;
+        }
+        .node-wrapper.active .sub-step.animate-in,
+        .node-wrapper.completed .sub-step { opacity: 1; transform: translateX(0); }
+        .sub-step.processing {
+            border-left-color: var(--color-warn);
+            color: var(--text-main);
+            background: rgba(245,158,11,0.1);
+        }
+        .sub-step.completed {
+            border-left-color: var(--color-success);
+            color: var(--text-main);
+            background: rgba(16,185,129,0.08);
+        }
+        .status-icon { width: 12px; height: 12px; display: flex; align-items: center; justify-content: center; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--panel-border); }
+        .sub-step.processing .status-dot {
+            background: var(--color-warn);
+            box-shadow: 0 0 6px var(--color-warn);
+            animation: pulse 1s infinite;
+        }
+        .sub-step.completed .status-dot { display: none; }
+        .sub-step .status-check { display: none; color: var(--color-success); font-size: 10px; font-weight: 700; }
+        .sub-step.completed .status-check { display: block; }
+        @keyframes pulse { 0%,100%{transform:scale(1);opacity:1;} 50%{transform:scale(1.4);opacity:0.5;} }
+
+        /* ───── Connectors with wait badge ───── */
+        .connector-wrapper {
+            position: relative; width: 80px; height: 40px;
+            display: flex; align-items: center;
+        }
+        .connector-svg { width: 100%; height: 100%; overflow: visible; }
+        .connector-path { fill: none; stroke: var(--panel-border); stroke-width: 2; }
+        .connector-path-active {
+            fill: none; stroke-width: 3;
+            stroke-dasharray: 10; stroke-dashoffset: 100;
+            opacity: 0; transition: opacity 0.3s ease;
+        }
+        .connector-wrapper.active .connector-path-active {
+            opacity: 1;
+            animation: flowData 1s linear infinite;
+            filter: drop-shadow(0 0 5px var(--theme-color));
+        }
+        @keyframes flowData { to { stroke-dashoffset: 0; } }
+        .data-packet {
+            position: absolute; width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--text-main);
+            box-shadow: 0 0 10px var(--text-main);
+            top: 50%; transform: translateY(-50%); opacity: 0;
+        }
+        .connector-wrapper.active .data-packet {
+            animation: shootPacket 1.5s cubic-bezier(0.4,0,0.2,1) infinite;
+        }
+        @keyframes shootPacket {
+            0% { left: 0; opacity: 0; transform: translateY(-50%) scale(0.5); }
+            10%{ opacity: 1; transform: translateY(-50%) scale(1); }
+            90%{ opacity: 1; transform: translateY(-50%) scale(1); }
+            100%{ left: 100%; opacity: 0; transform: translateY(-50%) scale(0.5); }
+        }
+        .connector-wait {
+            position: absolute;
+            top: -22px; left: 50%; transform: translateX(-50%);
+            font-size: 0.65rem;
+            color: var(--color-warn);
+            background: rgba(245,158,11,0.12);
+            padding: 2px 8px; border-radius: 10px;
+            border: 1px solid rgba(245,158,11,0.3);
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .connector-wait.show { opacity: 1; }
+
+        /* Node ports */
+        .node::before, .node::after {
+            content: ''; position: absolute; top: 50%;
+            transform: translateY(-50%);
+            width: 9px; height: 9px;
+            background: var(--bg-grid);
+            border: 2px solid var(--text-muted);
+            border-radius: 50%; z-index: 2;
+        }
+        .node::before { left: -5px; }
+        .node::after { right: -5px; }
+        .node-wrapper:first-child .node::before { display: none; }
+        .node-wrapper:last-child .node::after { display: none; }
+        .node-wrapper.active .node::after,
+        .node-wrapper.completed .node::after {
+            border-color: var(--theme-color);
+            background: var(--theme-color);
+            box-shadow: 0 0 10px var(--theme-color);
+        }
+
+        /* ───── Controls ───── */
+        .controls {
+            position: fixed; bottom: 18px; left: 50%;
+            transform: translateX(-50%);
+            background: rgba(17,21,28,0.85);
+            padding: 8px 18px; border-radius: 28px;
+            border: 1px solid var(--panel-border);
+            font-size: 0.82rem; color: var(--text-muted);
+            display: flex; gap: 14px; align-items: center;
+            z-index: 100;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+        }
+        .key {
+            background: var(--panel-border); color: var(--text-main);
+            padding: 3px 8px; border-radius: 5px;
+            font-size: 0.72rem; font-weight: 600;
+        }
+
+        /* ─────────────────────────────────────────── */
+        /* WINDOW RENDERERS — type-specific styles    */
+        /* ─────────────────────────────────────────── */
+
+        /* Common row enter animation */
+        .row-enter { animation: rowIn 0.5s cubic-bezier(0.2, 0.8, 0.3, 1.2); }
+        @keyframes rowIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* gmail-inbox */
+        .gi-list { display: flex; flex-direction: column; }
+        .gi-row {
+            display: grid; grid-template-columns: 24px 160px 1fr 70px;
+            gap: 12px; align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--panel-border);
+            font-size: 0.85rem;
+            transition: background 0.3s ease;
+        }
+        .gi-row.unread { background: rgba(0,229,255,0.04); }
+        .gi-row.unread .gi-from, .gi-row.unread .gi-subject { color: var(--text-main); font-weight: 600; }
+        .gi-row.read .gi-from, .gi-row.read .gi-subject { color: var(--text-muted); font-weight: 400; }
+        .gi-row.replied { background: rgba(16,185,129,0.06); }
+        .gi-row.highlight { background: rgba(0,229,255,0.1); box-shadow: inset 3px 0 0 var(--color-info); }
+        .gi-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-info); }
+        .gi-row.read .gi-dot, .gi-row.replied .gi-dot { background: transparent; border: 1px solid var(--text-dim); }
+        .gi-from { color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .gi-subject { color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .gi-subject .gi-preview { color: var(--text-dim); font-weight: 400; margin-left: 8px; }
+        .gi-time { font-size: 0.72rem; color: var(--text-dim); text-align: right; }
+        .gi-tag-replied { color: var(--color-success); font-size: 0.7rem; font-weight: 600; }
+
+        /* gmail-compose */
+        .gc-pane { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; height: 100%; }
+        .gc-field {
+            display: flex; align-items: center; gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--panel-border);
+            font-size: 0.85rem;
+        }
+        .gc-field-label { color: var(--text-dim); width: 60px; font-size: 0.78rem; }
+        .gc-field-value { color: var(--text-main); flex: 1; }
+        .gc-subject { font-weight: 500; }
+        .gc-body {
+            flex: 1; color: var(--text-main); font-size: 0.88rem;
+            line-height: 1.55; padding: 8px 0;
+            white-space: pre-wrap;
+            font-family: 'Outfit', sans-serif;
+        }
+        .gc-cursor { display: inline-block; width: 1px; height: 1.1em; background: var(--color-info); vertical-align: text-bottom; animation: blink 0.8s infinite; }
+        @keyframes blink { 0%,49%{opacity:1;} 50%,100%{opacity:0;} }
+        .gc-toolbar {
+            display: flex; gap: 8px; padding-top: 10px;
+            border-top: 1px solid var(--panel-border);
+        }
+        .gc-send-btn {
+            background: linear-gradient(135deg, #00e5ff, #0080ff);
+            color: #001824; padding: 8px 18px; border-radius: 6px;
+            font-size: 0.82rem; font-weight: 600;
+            border: none;
+            transition: transform 0.2s ease;
+        }
+        .gc-send-btn.fire { animation: sendFire 0.7s ease; }
+        @keyframes sendFire {
+            0%{transform:scale(1);}
+            40%{transform:scale(1.08);}
+            100%{transform:scale(0); opacity:0;}
+        }
+        .gc-sent-banner {
+            background: rgba(16,185,129,0.12);
+            color: var(--color-success);
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            text-align: center;
+            display: none;
+        }
+        .gc-sent-banner.show { display: block; animation: rowIn 0.5s ease; }
+
+        /* spreadsheet */
+        .ss-grid { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .ss-grid th, .ss-grid td {
+            padding: 9px 12px;
+            border-right: 1px solid var(--panel-border);
+            border-bottom: 1px solid var(--panel-border);
+            text-align: left;
+            color: var(--text-main);
+        }
+        .ss-grid th {
+            background: rgba(255,255,255,0.04);
+            color: var(--text-muted);
+            font-size: 0.74rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            position: sticky; top: 0; z-index: 1;
+        }
+        .ss-grid td.idx {
+            background: rgba(255,255,255,0.02);
+            color: var(--text-dim);
+            text-align: center;
+            font-size: 0.72rem;
+            width: 32px;
+        }
+        .ss-grid tr.highlight td:not(.idx) {
+            background: rgba(0,229,255,0.08);
+            box-shadow: inset 3px 0 0 var(--color-info);
+        }
+        .ss-grid td.highlight-cell {
+            background: rgba(245,158,11,0.15) !important;
+            box-shadow: inset 0 0 0 1px var(--color-warn);
+        }
+        .ss-grid .badge {
+            font-size: 0.7rem; padding: 2px 8px; border-radius: 10px;
+            font-weight: 600;
+        }
+        .ss-grid .badge.success { background: rgba(16,185,129,0.15); color: var(--color-success); }
+        .ss-grid .badge.warn    { background: rgba(245,158,11,0.15); color: var(--color-warn); }
+        .ss-grid .badge.info    { background: rgba(0,229,255,0.15); color: var(--color-info); }
+        .ss-grid .badge.muted   { background: rgba(255,255,255,0.05); color: var(--text-muted); }
+
+        /* chat */
+        .ch-thread { padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; }
+        .ch-msg {
+            max-width: 78%;
+            padding: 9px 13px;
+            border-radius: 14px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .ch-msg.them {
+            align-self: flex-start;
+            background: var(--panel-bg-2);
+            border-bottom-left-radius: 4px;
+            color: var(--text-main);
+        }
+        .ch-msg.me {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #00e5ff, #0080ff);
+            color: #001824;
+            border-bottom-right-radius: 4px;
+            font-weight: 500;
+        }
+        .ch-meta { font-size: 0.7rem; color: var(--text-dim); margin-bottom: 2px; }
+        .ch-typing {
+            align-self: flex-start;
+            background: var(--panel-bg-2);
+            padding: 10px 14px;
+            border-radius: 14px;
+            border-bottom-left-radius: 4px;
+            display: inline-flex; gap: 4px;
+        }
+        .ch-typing span {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--text-muted);
+            animation: typing 1.2s infinite;
+        }
+        .ch-typing span:nth-child(2){ animation-delay: 0.2s; }
+        .ch-typing span:nth-child(3){ animation-delay: 0.4s; }
+        @keyframes typing {
+            0%,60%,100%{ transform: translateY(0); opacity:0.4; }
+            30%{ transform: translateY(-4px); opacity:1; }
+        }
+
+        /* image-canvas */
+        .ic-wrap { padding: 16px; height: 100%; display: flex; flex-direction: column; gap: 10px; }
+        .ic-prompt {
+            font-size: 0.78rem; color: var(--text-muted);
+            background: var(--panel-bg-2);
+            padding: 8px 12px; border-radius: 6px;
+            border-left: 2px solid var(--color-info);
+        }
+        .ic-grid {
+            flex: 1;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            min-height: 0;
+        }
+        .ic-tile {
+            background: var(--panel-bg-2);
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            aspect-ratio: 1;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .ic-tile.skeleton {
+            background: linear-gradient(110deg, #1a1f2c 8%, #232a39 18%, #1a1f2c 33%);
+            background-size: 200% 100%;
+            animation: shimmer 1.4s infinite;
+        }
+        @keyframes shimmer { to { background-position: -200% 0; } }
+        .ic-tile.done {
+            background: linear-gradient(135deg, var(--theme-color, #00e5ff), #6366f1);
+            animation: tileReveal 0.6s cubic-bezier(0.2, 0.8, 0.3, 1.2);
+        }
+        .ic-tile.done::before {
+            content: attr(data-emoji);
+            font-size: 2.6rem;
+            filter: drop-shadow(0 4px 12px rgba(0,0,0,0.4));
+        }
+        .ic-tile.done.image {
+            background-size: cover;
+            background-position: center;
+        }
+        .ic-tile.done.image::before { content: ''; }
+        @keyframes tileReveal {
+            from { opacity: 0; transform: scale(0.92); filter: blur(6px); }
+            to   { opacity: 1; transform: scale(1); filter: blur(0); }
+        }
+        .ic-tile-label {
+            position: absolute; bottom: 6px; left: 8px; right: 8px;
+            font-size: 0.7rem;
+            color: var(--text-main);
+            background: rgba(0,0,0,0.55);
+            padding: 3px 6px; border-radius: 4px;
+            text-align: center;
+            backdrop-filter: blur(2px);
+        }
+
+        /* video-canvas */
+        .vc-wrap { padding: 16px; height: 100%; display: flex; flex-direction: column; gap: 12px; }
+        .vc-screen {
+            flex: 1;
+            background: #000;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+            min-height: 0;
+        }
+        .vc-screen .vc-poster {
+            width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 3rem;
+            background: linear-gradient(135deg, var(--theme-color, #00e5ff), #6366f1);
+            color: #fff;
+            filter: drop-shadow(0 4px 12px rgba(0,0,0,0.4));
+        }
+        .vc-screen .vc-poster.image {
+            background-size: cover;
+            background-position: center;
+        }
+        .vc-screen.rendering::after {
+            content: '';
+            position: absolute; inset: 0;
+            background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+            background-size: 200% 100%;
+            animation: shimmer 1.6s infinite;
+        }
+        .vc-screen.playing .vc-play-icon { opacity: 0; }
+        .vc-play-icon {
+            position: absolute;
+            width: 56px; height: 56px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.55);
+            display: flex; align-items: center; justify-content: center;
+            color: #fff;
+            font-size: 1.3rem;
+            transition: opacity 0.4s ease;
+        }
+        .vc-timeline {
+            display: flex; gap: 4px; height: 44px;
+        }
+        .vc-frame {
+            flex: 1; min-width: 0;
+            background: var(--panel-bg-2);
+            border-radius: 4px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1rem;
+            opacity: 0.4;
+            border: 1px solid var(--panel-border);
+        }
+        .vc-frame.added {
+            opacity: 1;
+            background: linear-gradient(135deg, var(--theme-color, #00e5ff), #6366f1);
+        }
+        .vc-frame.added.image {
+            background-size: cover;
+            background-position: center;
+        }
+        .vc-progress {
+            height: 3px;
+            background: var(--panel-border);
+            border-radius: 2px;
+            overflow: hidden;
+            position: relative;
+        }
+        .vc-progress-bar {
+            height: 100%; width: 0%;
+            background: var(--color-info);
+            transition: width 0.4s ease;
+        }
+
+        /* browser */
+        .br-bar {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 14px;
+            background: var(--panel-bg-2);
+            border-bottom: 1px solid var(--panel-border);
+        }
+        .br-btns { display: flex; gap: 6px; color: var(--text-dim); font-size: 0.9rem; }
+        .br-url {
+            flex: 1;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            padding: 5px 12px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .br-content { padding: 16px 20px; font-size: 0.85rem; line-height: 1.5; }
+        .br-result {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--panel-border);
+        }
+        .br-result-title { color: var(--color-info); font-weight: 500; margin-bottom: 3px; }
+        .br-result-url { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
+        .br-result-snippet { color: var(--text-muted); font-size: 0.8rem; }
+
+        /* social-post */
+        .sp-pane { padding: 16px 18px; }
+        .sp-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .sp-avatar {
+            width: 42px; height: 42px; border-radius: 50%;
+            background: linear-gradient(135deg, #ec4899, #8b5cf6);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.1rem; font-weight: 700; color: #fff;
+        }
+        .sp-name { font-weight: 600; font-size: 0.88rem; }
+        .sp-handle { font-size: 0.78rem; color: var(--text-muted); }
+        .sp-text {
+            font-size: 0.92rem; line-height: 1.5; color: var(--text-main);
+            white-space: pre-wrap;
+            min-height: 80px;
+        }
+        .sp-toolbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding-top: 14px; margin-top: 14px;
+            border-top: 1px solid var(--panel-border);
+        }
+        .sp-counter { font-size: 0.78rem; color: var(--text-muted); }
+        .sp-counter.ok { color: var(--color-success); }
+        .sp-post-btn {
+            background: var(--text-main); color: #000;
+            padding: 7px 18px; border-radius: 16px;
+            font-size: 0.82rem; font-weight: 700;
+            border: none;
+        }
+        .sp-posted {
+            margin-top: 12px;
+            background: rgba(16,185,129,0.12);
+            color: var(--color-success);
+            padding: 8px 12px; border-radius: 6px;
+            font-size: 0.82rem; font-weight: 500;
+            text-align: center;
+            display: none;
+        }
+        .sp-posted.show { display: block; animation: rowIn 0.4s ease; }
+
+        /* crm-card */
+        .crm-pane { padding: 18px; }
+        .crm-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+        .crm-name { font-size: 1.05rem; font-weight: 600; }
+        .crm-sub { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+        .crm-status {
+            padding: 5px 12px; border-radius: 14px;
+            font-size: 0.72rem; font-weight: 600;
+        }
+        .crm-status.new { background: rgba(0,229,255,0.15); color: var(--color-info); }
+        .crm-status.qualified { background: rgba(245,158,11,0.15); color: var(--color-warn); }
+        .crm-status.won { background: rgba(16,185,129,0.15); color: var(--color-success); }
+        .crm-status.lost { background: rgba(239,68,68,0.15); color: #f87171; }
+        .crm-fields { display: grid; grid-template-columns: 100px 1fr; gap: 10px 14px; }
+        .crm-fk { font-size: 0.78rem; color: var(--text-dim); }
+        .crm-fv { font-size: 0.85rem; color: var(--text-main); }
+        .crm-fv.fade-in { animation: rowIn 0.4s ease; }
+
+        /* notion-doc */
+        .nd-pane { padding: 24px 28px; max-width: 100%; }
+        .nd-title { font-size: 1.4rem; font-weight: 700; margin-bottom: 16px; }
+        .nd-block { font-size: 0.9rem; line-height: 1.55; color: var(--text-main); margin-bottom: 12px; }
+        .nd-block.h2 { font-size: 1.05rem; font-weight: 600; margin-top: 18px; margin-bottom: 8px; }
+        .nd-block.bullet { padding-left: 18px; position: relative; }
+        .nd-block.bullet::before { content: '•'; position: absolute; left: 4px; color: var(--text-muted); }
+        .nd-block.fade-in { animation: rowIn 0.5s ease; }
+
+        /* terminal */
+        .tm-pane {
+            padding: 14px 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            line-height: 1.55;
+            background: #07090e;
+        }
+        .tm-line { color: var(--text-main); white-space: pre-wrap; }
+        .tm-line.cmd::before { content: '$ '; color: var(--color-success); }
+        .tm-line.out { color: var(--text-muted); }
+        .tm-line.err { color: #f87171; }
+        .tm-line.fade-in { animation: rowIn 0.3s ease; }
+
+        /* generic html (fallback) */
+        .gen-pane { padding: 18px; }
+
+        /* Empty state */
+        .empty-state {
+            height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            flex-direction: column; gap: 10px;
+            color: var(--text-dim);
+            font-size: 0.85rem;
+        }
+        .empty-state-icon { font-size: 2.4rem; opacity: 0.3; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div>
+            <h1>WhatsApp Onboarding</h1>
+            <div class="subtitle">Skool'a kayıt olan üyeye 7 gün boyunca WhatsApp üzerinden eğitim videoları otomatik gider.</div>
+        </div>
+        <div class="live-pill"><span class="dot"></span>Canlı Demo</div>
+    </div>
+
+    <div class="demo-row" id="demoRow"></div>
+
+    <div class="flow-canvas" id="canvas">
+        <div class="flow-container" id="flowContainer"></div>
+    </div>
+
+    <div class="controls">
+        <span><span class="key">Space</span> veya <span class="key">→</span> ile akışı ilerlet</span>
+        <span><span class="key">←</span> geri al</span>
+    </div>
+
+    <script>
+    /* ─────────────────────────────────────────
+       WINDOWS MANIFEST — top demo windows
+       Each window: { id, type, title }
+       Types available:
+         gmail-inbox, gmail-compose, spreadsheet, chat,
+         image-canvas, video-canvas, browser, social-post,
+         crm-card, notion-doc, terminal, html
+       ───────────────────────────────────────── */
+    const windowsManifest = /*__WINDOWS_DATA__*/[
+        { id: 'A', type: 'crm-card', platform: 'notion', title: 'Notion CRM — Üye Kartı' },
+        { id: 'B', type: 'chat', platform: 'whatsapp', title: 'WhatsApp — Eğitim Hattı' }
+    ]/*__WINDOWS_DATA_END__*/
+
+    /* ─────────────────────────────────────────
+       NODES — bottom flow + per-step window frames
+       Each node: { title, desc, icon, subSteps, waitMs, waitLabel, frames }
+       frames = { [windowId]: action }   // applied when step becomes active
+       ───────────────────────────────────────── */
+    const nodesData = /*__NODES_DATA__*/[
+        {
+            title: 'Skool Kaydı',
+            desc: 'Yeni üye AI Factory\'ye katıldı, sistem tetiklendi.',
+            icon: '🎓',
+            subSteps: ['Üyelik alındı', 'Kayıt sisteme düştü'],
+            frames: { A: { action: 'open', name: 'Mehmet Yıldırım', sub: 'AI Factory — yeni üye', status: 'new', fields: [{ k: 'Plan', v: 'Yıllık' }] } }
+        },
+        {
+            title: 'Numara Doğrulandı',
+            desc: 'Üyenin telefonu kontrol edildi, onboarding kanalı açıldı.',
+            icon: '📞',
+            subSteps: ['Telefon okundu', 'Format doğrulandı'],
+            frames: { A: { action: 'fill', field: 'Telefon', value: '+90 532 *** 1842' } }
+        },
+        {
+            title: 'Gün 0 — Hoş Geldin',
+            desc: 'Aynı gün karşılama mesajı ve giriş videosu WhatsApp\'a düşer.',
+            icon: '👋',
+            subSteps: ['Karşılama hazırlandı', 'WhatsApp\'a iletildi'],
+            waitMs: 900,
+            waitLabel: 'WhatsApp\'a gönderiliyor',
+            frames: {
+                A: { action: 'status', status: 'qualified' },
+                B: { action: 'message', side: 'me', text: 'Merhaba Mehmet! 👋 AI Factory\'ye hoş geldin. 7 gün boyunca her öğlen sana bir video düşecek. İlki yolda 🎬', meta: 'AI Factory' }
+            }
+        },
+        {
+            title: 'Gün 1 — İlk Ders',
+            desc: 'Ertesi gün öğlen ilk eğitim videosu otomatik gönderilir.',
+            icon: '🎬',
+            subSteps: ['Sıradaki video seçildi', 'Üyeye iletildi'],
+            frames: {
+                A: { action: 'fill', field: 'İlerleme', value: 'Gün 0 izlendi ✓' },
+                B: { action: 'message', side: 'me', text: '1. gün 🎬 Bugün Antigravity nedir, nasıl açılır onu öğreniyoruz. Video aşağıda 👇', meta: 'AI Factory' }
+            }
+        },
+        {
+            title: 'Üye Soru Soruyor',
+            desc: 'Mehmet videoyu izledi, takıldığı yeri yazdı.',
+            icon: '💭',
+            subSteps: ['Mesaj alındı', 'Soru tespit edildi'],
+            frames: {
+                A: { action: 'fill', field: 'Son Aktivite', value: 'Soru sordu' },
+                B: { action: 'message', side: 'them', text: 'Bot çalıştı ama API key\'i nereye girmem gerekiyor?', meta: 'Mehmet' }
+            }
+        },
+        {
+            title: 'Asistan Cevap Veriyor',
+            desc: 'Bot soruyu okur, doğru klasörü ve adımı anında yanıtlar.',
+            icon: '🤖',
+            subSteps: ['Soru anlaşıldı', 'Cevap üretildi', 'Gönderildi'],
+            waitMs: 1100,
+            waitLabel: 'Asistan cevap hazırlıyor',
+            frames: {
+                B: { action: 'message', side: 'me', text: 'Harika soru Mehmet 👇 .env dosyasının en üstüne OPENAI_API_KEY=... satırını ekle, sonra botu yeniden başlat. Eğer takılırsan ekran görüntüsü at, beraber bakalım.', meta: 'AI Factory' }
+            }
+        },
+        {
+            title: 'Gün 2-4 — Drip Devam',
+            desc: 'Sonraki üç gün boyunca her öğlen sıradaki video otomatik düşer.',
+            icon: '📅',
+            subSteps: ['Gün 2 gönderildi', 'Gün 3 gönderildi', 'Gün 4 gönderildi'],
+            frames: {
+                A: { action: 'set-field', field: 'İlerleme', value: 'Gün 1-2-3-4 izlendi ✓' },
+                B: { action: 'message', side: 'me', text: '4. gün ⚡ Bugüne kadar 4 video birikti. Bugünkü konu: kendi botunu Telegram\'a kurmak. İzlemeye hazır mısın?', meta: 'AI Factory' }
+            }
+        },
+        {
+            title: 'Gün 5-6 — Üye Üretiyor',
+            desc: 'Mehmet öğrendiğini uygular, sonucunu paylaşır; bot tebrik eder.',
+            icon: '⚡',
+            subSteps: ['Üye proje paylaştı', 'Bot geri bildirim verdi'],
+            frames: {
+                A: { action: 'set-field', field: 'Son Aktivite', value: 'Kendi botunu paylaştı 🚀' },
+                B: { action: 'message', side: 'them', text: 'İlk botum çalıştı, Skool\'a da attım! 🎉', meta: 'Mehmet' }
+            }
+        },
+        {
+            title: 'Gün 7 — Final',
+            desc: 'Son video gönderilir, üye aktif kullanıcı statüsüne yükseltilir.',
+            icon: '🏁',
+            subSteps: ['Final videosu iletildi', 'CRM güncellendi'],
+            frames: {
+                A: { action: 'status', status: 'won' },
+                B: { action: 'message', side: 'me', text: '7. gün 🏁 Tebrikler Mehmet, onboarding tamam! Topluluk kanalında diğer üyelerle buluşalım. Burada her zaman yanındayız.', meta: 'AI Factory' }
+            }
+        }
+    ]/*__NODES_DATA_END__*/
+
+    /* ─────────────────────────────────────────
+       Window renderers
+       Each renderer: { init(state), apply(state, action), render(state, container) }
+       ───────────────────────────────────────── */
+    const renderers = {
+        'gmail-inbox': {
+            init: () => ({ rows: [], highlight: -1 }),
+            apply: (s, a) => {
+                if (!a) return s;
+                const ns = { rows: s.rows.slice(), highlight: s.highlight };
+                if (a.action === 'add-row') {
+                    ns.rows.push({ ...a.row, _new: true });
+                    ns.highlight = ns.rows.length - 1;
+                } else if (a.action === 'highlight') {
+                    ns.highlight = a.index;
+                } else if (a.action === 'mark') {
+                    if (ns.rows[a.index]) ns.rows[a.index] = { ...ns.rows[a.index], tag: a.tag, _new: false };
+                } else if (a.action === 'reset') {
+                    return { rows: [], highlight: -1 };
+                }
+                return ns;
+            },
+            render: (s, el) => {
+                if (!s.rows.length) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📭</div><div>Gelen kutusu boş</div></div>`;
+                    return;
+                }
+                el.innerHTML = `<div class="gi-list">${s.rows.map((r, i) => `
+                    <div class="gi-row ${r.tag || 'unread'} ${i === s.highlight ? 'highlight' : ''} ${r._new ? 'row-enter' : ''}">
+                        <div class="gi-dot"></div>
+                        <div class="gi-from">${r.from || ''}</div>
+                        <div class="gi-subject">${r.subject || ''}<span class="gi-preview"> — ${r.preview || ''}</span></div>
+                        <div class="gi-time">${r.tag === 'replied' ? '<span class="gi-tag-replied">↩ Yanıtlandı</span>' : (r.time || '')}</div>
+                    </div>`).join('')}</div>`;
+            }
+        },
+
+        'gmail-compose': {
+            init: () => ({ to: '', subject: '', body: '', sent: false, typingBody: false }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'open')        return { ...s, to: a.to || '', subject: a.subject || '', body: '', sent: false, typingBody: false };
+                if (a.action === 'type-body')   return { ...s, body: a.body || '', typingBody: true };
+                if (a.action === 'set-subject') return { ...s, subject: a.subject || '' };
+                if (a.action === 'send')        return { ...s, sent: true, typingBody: false };
+                if (a.action === 'clear')       return { to: '', subject: '', body: '', sent: false, typingBody: false };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.to && !s.subject && !s.body && !s.sent) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">✏️</div><div>Yanıt bekleniyor…</div></div>`;
+                    return;
+                }
+                if (s.sent) {
+                    el.innerHTML = `<div class="gc-pane">
+                        <div class="gc-field"><div class="gc-field-label">Kime</div><div class="gc-field-value">${s.to}</div></div>
+                        <div class="gc-field"><div class="gc-field-label">Konu</div><div class="gc-field-value gc-subject">${s.subject}</div></div>
+                        <div class="gc-body">${s.body}</div>
+                        <div class="gc-sent-banner show">✓ Gönderildi</div>
+                    </div>`;
+                    return;
+                }
+                el.innerHTML = `<div class="gc-pane">
+                    <div class="gc-field"><div class="gc-field-label">Kime</div><div class="gc-field-value">${s.to}</div></div>
+                    <div class="gc-field"><div class="gc-field-label">Konu</div><div class="gc-field-value gc-subject">${s.subject}</div></div>
+                    <div class="gc-body" id="gcBody"></div>
+                    <div class="gc-toolbar"><button class="gc-send-btn">Gönder ›</button></div>
+                </div>`;
+                if (s.typingBody) {
+                    typewriter(el.querySelector('#gcBody'), s.body);
+                } else {
+                    const b = el.querySelector('#gcBody');
+                    if (b) b.textContent = s.body;
+                }
+            }
+        },
+
+        'spreadsheet': {
+            init: () => ({ headers: [], rows: [], highlightRow: -1, highlightCell: null }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'set-headers') return { ...s, headers: a.headers || [] };
+                if (a.action === 'add-row') {
+                    const rows = s.rows.concat([{ cells: a.row || [], _new: true }]);
+                    return { ...s, rows, highlightRow: rows.length - 1, highlightCell: null };
+                }
+                if (a.action === 'highlight') return { ...s, highlightRow: a.row ?? -1, highlightCell: a.cell || null };
+                if (a.action === 'update-cell') {
+                    const rows = s.rows.map((r, i) => {
+                        if (i !== a.row) return r;
+                        const cells = r.cells.slice();
+                        cells[a.col] = a.value;
+                        return { ...r, cells, _new: false };
+                    });
+                    return { ...s, rows, highlightCell: { row: a.row, col: a.col } };
+                }
+                if (a.action === 'reset') return { headers: s.headers, rows: [], highlightRow: -1, highlightCell: null };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.headers.length && !s.rows.length) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📊</div><div>Tablo boş</div></div>`;
+                    return;
+                }
+                const headTh = ['<th class="idx">#</th>'].concat((s.headers || []).map(h => `<th>${h}</th>`)).join('');
+                const rowsHtml = s.rows.map((r, i) => {
+                    const tds = r.cells.map((c, j) => {
+                        const isHL = s.highlightCell && s.highlightCell.row === i && s.highlightCell.col === j;
+                        return `<td class="${isHL ? 'highlight-cell' : ''}">${formatCell(c)}</td>`;
+                    }).join('');
+                    return `<tr class="${i === s.highlightRow ? 'highlight' : ''} ${r._new ? 'row-enter' : ''}">
+                        <td class="idx">${i + 1}</td>${tds}</tr>`;
+                }).join('');
+                el.innerHTML = `<table class="ss-grid"><thead><tr>${headTh}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+            }
+        },
+
+        'chat': {
+            init: () => ({ messages: [], typing: null }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'message') {
+                    return { messages: s.messages.concat([{ side: a.side || 'them', text: a.text || '', meta: a.meta, _new: true }]), typing: null };
+                }
+                if (a.action === 'typing')      return { ...s, typing: a.side || 'them' };
+                if (a.action === 'stop-typing') return { ...s, typing: null };
+                if (a.action === 'reset')       return { messages: [], typing: null };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.messages.length && !s.typing) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">💬</div><div>Konuşma başlamadı</div></div>`;
+                    return;
+                }
+                const msgs = s.messages.map(m => `
+                    ${m.meta ? `<div class="ch-meta">${m.meta}</div>` : ''}
+                    <div class="ch-msg ${m.side} ${m._new ? 'row-enter' : ''}">${m.text}</div>`).join('');
+                const typingHtml = s.typing ? `<div class="ch-typing"><span></span><span></span><span></span></div>` : '';
+                el.innerHTML = `<div class="ch-thread">${msgs}${typingHtml}</div>`;
+                el.scrollTop = el.scrollHeight;
+            }
+        },
+
+        'image-canvas': {
+            init: () => ({ prompt: '', tiles: [] }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'prompt') return { ...s, prompt: a.prompt || '' };
+                if (a.action === 'generate') {
+                    const tiles = (a.tiles || []).map(t => ({ ...t, status: 'loading' }));
+                    return { ...s, tiles, prompt: a.prompt ?? s.prompt };
+                }
+                if (a.action === 'finish') {
+                    return { ...s, tiles: s.tiles.map(t => ({ ...t, status: 'done' })) };
+                }
+                if (a.action === 'reset') return { prompt: '', tiles: [] };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.prompt && !s.tiles.length) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🖼️</div><div>Görsel bekleniyor</div></div>`;
+                    return;
+                }
+                const promptHtml = s.prompt ? `<div class="ic-prompt">"${s.prompt}"</div>` : '';
+                const tilesHtml = s.tiles.map(t => {
+                    if (t.status === 'done') {
+                        if (t.image) {
+                            return `<div class="ic-tile done image" style="background-image:url('${t.image}')">${t.label ? `<div class="ic-tile-label">${t.label}</div>` : ''}</div>`;
+                        }
+                        return `<div class="ic-tile done" data-emoji="${t.emoji || '🖼️'}"><div class="ic-tile-label">${t.label || ''}</div></div>`;
+                    }
+                    return `<div class="ic-tile skeleton"></div>`;
+                }).join('');
+                el.innerHTML = `<div class="ic-wrap">${promptHtml}<div class="ic-grid">${tilesHtml}</div></div>`;
+            }
+        },
+
+        'video-canvas': {
+            init: () => ({ frames: [], rendering: false, playing: false, posterEmoji: '🎬', posterImage: null, progress: 0 }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'add-frame') {
+                    return { ...s, frames: s.frames.concat([{ emoji: a.emoji || '🎞️', image: a.image || null }]) };
+                }
+                if (a.action === 'render')  return { ...s, rendering: true, progress: a.progress ?? 30 };
+                if (a.action === 'finish')  return { ...s, rendering: false, progress: 100, posterEmoji: a.poster || s.posterEmoji, posterImage: a.posterImage || s.posterImage };
+                if (a.action === 'play')    return { ...s, playing: true };
+                if (a.action === 'reset')   return { frames: [], rendering: false, playing: false, posterEmoji: '🎬', posterImage: null, progress: 0 };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.frames.length && !s.rendering) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🎬</div><div>Video bekleniyor</div></div>`;
+                    return;
+                }
+                const slots = 8;
+                const framesHtml = Array.from({ length: slots }).map((_, i) => {
+                    const f = s.frames[i];
+                    if (!f) return `<div class="vc-frame">·</div>`;
+                    if (f.image) return `<div class="vc-frame added image" style="background-image:url('${f.image}')"></div>`;
+                    return `<div class="vc-frame added">${f.emoji}</div>`;
+                }).join('');
+                const posterHtml = s.posterImage
+                    ? `<div class="vc-poster image" style="background-image:url('${s.posterImage}')"></div>`
+                    : `<div class="vc-poster">${s.posterEmoji}</div>`;
+                el.innerHTML = `<div class="vc-wrap">
+                    <div class="vc-screen ${s.rendering ? 'rendering' : ''} ${s.playing ? 'playing' : ''}">
+                        ${posterHtml}
+                        <div class="vc-play-icon">▶</div>
+                    </div>
+                    <div class="vc-progress"><div class="vc-progress-bar" style="width:${s.progress}%"></div></div>
+                    <div class="vc-timeline">${framesHtml}</div>
+                </div>`;
+            }
+        },
+
+        'browser': {
+            init: () => ({ url: '', results: [], html: '' }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'navigate') return { ...s, url: a.url || '' };
+                if (a.action === 'results')  return { ...s, results: a.results || [], html: '' };
+                if (a.action === 'show-html')return { ...s, html: a.html || '', results: [] };
+                if (a.action === 'reset')    return { url: '', results: [], html: '' };
+                return s;
+            },
+            render: (s, el) => {
+                const bar = `<div class="br-bar">
+                    <div class="br-btns">‹ › ↻</div>
+                    <div class="br-url">${s.url || 'about:blank'}</div>
+                </div>`;
+                let body = '';
+                if (s.results.length) {
+                    body = `<div class="br-content">${s.results.map(r => `
+                        <div class="br-result row-enter">
+                            <div class="br-result-url">${r.url || ''}</div>
+                            <div class="br-result-title">${r.title || ''}</div>
+                            <div class="br-result-snippet">${r.snippet || ''}</div>
+                        </div>`).join('')}</div>`;
+                } else if (s.html) {
+                    body = `<div class="br-content">${s.html}</div>`;
+                } else if (!s.url) {
+                    body = `<div class="empty-state"><div class="empty-state-icon">🌐</div><div>Tarayıcı boşta</div></div>`;
+                } else {
+                    body = `<div class="br-content"><div class="empty-state"><div class="empty-state-icon">⏳</div><div>Yükleniyor…</div></div></div>`;
+                }
+                el.innerHTML = bar + body;
+            }
+        },
+
+        'social-post': {
+            init: () => ({ author: '', handle: '', text: '', posted: false }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'compose') return { author: a.author || s.author, handle: a.handle || s.handle, text: a.text ?? s.text, posted: false };
+                if (a.action === 'type')    return { ...s, text: a.text || '', posted: false };
+                if (a.action === 'post')    return { ...s, posted: true };
+                if (a.action === 'reset')   return { author: '', handle: '', text: '', posted: false };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.author && !s.text) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">✨</div><div>Paylaşım hazırlanıyor</div></div>`;
+                    return;
+                }
+                const len = (s.text || '').length;
+                const limit = 280;
+                const remaining = limit - len;
+                const avatarLetter = (s.author || '?').charAt(0).toUpperCase();
+                el.innerHTML = `<div class="sp-pane">
+                    <div class="sp-header">
+                        <div class="sp-avatar">${avatarLetter}</div>
+                        <div>
+                            <div class="sp-name">${s.author || ''}</div>
+                            <div class="sp-handle">${s.handle || ''}</div>
+                        </div>
+                    </div>
+                    <div class="sp-text" id="spText"></div>
+                    <div class="sp-toolbar">
+                        <div class="sp-counter ${remaining >= 0 ? 'ok' : ''}">${remaining}</div>
+                        <button class="sp-post-btn">Paylaş</button>
+                    </div>
+                    <div class="sp-posted ${s.posted ? 'show' : ''}">✓ Paylaşıldı</div>
+                </div>`;
+                if (!s.posted) typewriter(el.querySelector('#spText'), s.text);
+                else el.querySelector('#spText').textContent = s.text;
+            }
+        },
+
+        'crm-card': {
+            init: () => ({ name: '', sub: '', status: 'new', fields: [], filling: -1 }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'open')      return { name: a.name || '', sub: a.sub || '', status: a.status || 'new', fields: a.fields || [], filling: -1 };
+                if (a.action === 'fill')      return { ...s, fields: s.fields.concat([{ k: a.field, v: a.value, _new: true }]) };
+                if (a.action === 'set-field') return { ...s, fields: s.fields.map(f => f.k === a.field ? { ...f, v: a.value, _new: true } : f) };
+                if (a.action === 'status')    return { ...s, status: a.status || s.status };
+                if (a.action === 'reset')     return { name: s.name, sub: s.sub, status: 'new', fields: [], filling: -1 };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.name && !s.fields.length) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">👤</div><div>Kayıt yok</div></div>`;
+                    return;
+                }
+                const fHtml = s.fields.map(f => `
+                    <div class="crm-fk">${f.k}</div>
+                    <div class="crm-fv ${f._new ? 'fade-in' : ''}">${f.v}</div>`).join('');
+                el.innerHTML = `<div class="crm-pane">
+                    <div class="crm-head">
+                        <div>
+                            <div class="crm-name">${s.name}</div>
+                            <div class="crm-sub">${s.sub}</div>
+                        </div>
+                        <div class="crm-status ${s.status}">${s.status.toUpperCase()}</div>
+                    </div>
+                    <div class="crm-fields">${fHtml}</div>
+                </div>`;
+            }
+        },
+
+        'notion-doc': {
+            init: () => ({ title: '', blocks: [] }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'title') return { ...s, title: a.title || '' };
+                if (a.action === 'block') return { ...s, blocks: s.blocks.concat([{ type: a.type || 'p', text: a.text || '', _new: true }]) };
+                if (a.action === 'reset') return { title: '', blocks: [] };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.title && !s.blocks.length) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📝</div><div>Doküman boş</div></div>`;
+                    return;
+                }
+                const blocksHtml = s.blocks.map(b => `<div class="nd-block ${b.type} ${b._new ? 'fade-in' : ''}">${b.text}</div>`).join('');
+                el.innerHTML = `<div class="nd-pane">
+                    ${s.title ? `<div class="nd-title">${s.title}</div>` : ''}
+                    ${blocksHtml}
+                </div>`;
+            }
+        },
+
+        'terminal': {
+            init: () => ({ lines: [] }),
+            apply: (s, a) => {
+                if (!a) return s;
+                if (a.action === 'cmd')   return { lines: s.lines.concat([{ kind: 'cmd', text: a.text || '', _new: true }]) };
+                if (a.action === 'out')   return { lines: s.lines.concat([{ kind: 'out', text: a.text || '', _new: true }]) };
+                if (a.action === 'err')   return { lines: s.lines.concat([{ kind: 'err', text: a.text || '', _new: true }]) };
+                if (a.action === 'reset') return { lines: [] };
+                return s;
+            },
+            render: (s, el) => {
+                if (!s.lines.length) {
+                    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">⌨️</div><div>Terminal hazır</div></div>`;
+                    return;
+                }
+                el.innerHTML = `<div class="tm-pane">${s.lines.map(l => `<div class="tm-line ${l.kind} ${l._new ? 'fade-in' : ''}">${escapeHtml(l.text)}</div>`).join('')}</div>`;
+                el.scrollTop = el.scrollHeight;
+            }
+        },
+
+        'html': {
+            init: () => ({ html: '' }),
+            apply: (s, a) => a && a.action === 'set' ? { html: a.html || '' } : s,
+            render: (s, el) => {
+                el.innerHTML = s.html ? `<div class="gen-pane">${s.html}</div>` : `<div class="empty-state"><div class="empty-state-icon">🪟</div><div>İçerik bekleniyor</div></div>`;
+            }
+        }
+    };
+
+    /* ─────────────────────────────────────────
+       Helpers
+       ───────────────────────────────────────── */
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function formatCell(c) {
+        if (c == null) return '';
+        if (typeof c === 'object' && c.badge) return `<span class="badge ${c.badge}">${c.text}</span>`;
+        return String(c);
+    }
+    let typewriterToken = 0;
+    function typewriter(el, text, speed = 32) {
+        if (!el) return;
+        const myToken = ++typewriterToken;
+        el.textContent = '';
+        const cursor = document.createElement('span');
+        cursor.className = 'gc-cursor';
+        el.appendChild(cursor);
+        let i = 0;
+        const step = () => {
+            if (myToken !== typewriterToken) return;
+            if (i < text.length) {
+                cursor.insertAdjacentText('beforebegin', text.charAt(i));
+                i++;
+                setTimeout(step, speed);
+            }
+        };
+        step();
+    }
+
+    /* ─────────────────────────────────────────
+       Engine — windows + flow + step navigation
+       ───────────────────────────────────────── */
+    const themeColors = ['#ff7e67', '#00e5ff', '#b167ff', '#f59e0b', '#10b981', '#ec4899', '#6366f1'];
+    const demoRow = document.getElementById('demoRow');
+    const flowContainer = document.getElementById('flowContainer');
+    const flowCanvas = document.getElementById('canvas');
+    let currentIndex = -1;
+    let stepLockToken = 0;
+
+    // Build demo windows
+    const windowEls = {};   // id → { titlebarStatus, body, waitOverlay, waitLabel }
+    /* Platform logos — inline SVG */
+    const platformLogos = {
+        gmail: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#fff"/><path d="M3.5 7.2v9.6c0 .55.45 1 1 1H7V11l5 3.7L17 11v6.8h2.5c.55 0 1-.45 1-1V7.2c0-.7-.8-1.1-1.36-.68L17 8.3V7l-5 3.7L7 7v1.3L4.86 6.52C4.3 6.1 3.5 6.5 3.5 7.2z" fill="#ea4335"/></svg>`,
+        telegram: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="12" fill="#229ED9"/><path d="M5.5 11.7l11.8-4.6c.5-.2 1 .1.8.8l-2 9.5c-.1.5-.5.6-.9.4l-2.6-1.9-1.3 1.2c-.1.1-.3.2-.5.2l.2-2.7 4.9-4.4c.2-.2 0-.3-.3-.1l-6 3.8-2.6-.8c-.6-.2-.6-.6.5-.9z" fill="#fff"/></svg>`,
+        whatsapp: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="12" fill="#25D366"/><path d="M16.6 13.6c-.2-.1-1.4-.7-1.6-.8-.2-.1-.4-.1-.5.1-.2.2-.6.7-.7.9-.1.1-.3.2-.5.1-.7-.4-1.4-.8-2-1.6-.5-.6-.9-1.3-1-1.6-.1-.3 0-.4.1-.5l.4-.4c.1-.1.2-.3.3-.4.1-.2 0-.3 0-.4-.1-.1-.5-1.2-.7-1.6-.2-.4-.4-.4-.5-.4h-.5c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 2 0 1.2.8 2.3 1 2.5.1.2 1.6 2.5 4 3.4 1.4.5 2 .6 2.7.5.4-.1 1.3-.5 1.5-1.1.2-.5.2-1 .1-1.1-.1-.1-.2-.2-.4-.3z" fill="#fff"/></svg>`,
+        linkedin: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#0A66C2"/><path d="M7.4 9.5h2.5v8h-2.5v-8zm1.25-3.6c.8 0 1.45.65 1.45 1.45 0 .8-.65 1.45-1.45 1.45-.8 0-1.45-.65-1.45-1.45 0-.8.65-1.45 1.45-1.45zM11.5 9.5h2.4v1.1h.03c.33-.62 1.15-1.27 2.37-1.27 2.5 0 3 1.65 3 3.78V17.5h-2.5v-3.94c0-.94-.02-2.15-1.31-2.15-1.31 0-1.51 1.02-1.51 2.08V17.5H11.5v-8z" fill="#fff"/></svg>`,
+        twitter: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#000"/><path d="M14.27 10.7L19.4 5h-1.22l-4.46 4.94L10.16 5H6l5.4 7.5L6 18.5h1.22l4.71-5.22 3.77 5.22H19.8l-5.53-7.8zM12.55 12.6l-.55-.76-4.36-5.95h1.86l3.5 4.78.55.76 4.55 6.21h-1.86l-3.7-5.04z" fill="#fff"/></svg>`,
+        notion: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#fff"/><path d="M6.6 6h2L13 12.5V6h2v12h-2L8.6 11.5V18h-2V6z" fill="#000"/></svg>`,
+        sheets: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="3" width="16" height="18" rx="2" fill="#0F9D58"/><path d="M7 8h10v2H7zM7 11h10v2H7zM7 14h10v2H7zM10 8v8M14 8v8" stroke="#fff" stroke-width="0.6" fill="none"/></svg>`,
+        perplexity: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#20808D"/><path d="M12 5l4.5 3.6V12L12 8.4 7.5 12V8.6L12 5zm-4.5 7.5L12 16l4.5-3.5V19L12 15.4 7.5 19v-6.5z" fill="#fff"/></svg>`,
+        apify: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#FF9012"/><path d="M12 5L5 19h3l1.2-3h5.6l1.2 3h3L12 5zm-1.6 8L12 9.5 13.6 13h-3.2z" fill="#fff"/></svg>`,
+        drive: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M5 18l3-5 3 5H5z" fill="#0066DA"/><path d="M11 8l3 5h6l-3-5h-6z" fill="#FFC107"/><path d="M14 13l-3 5 6-5h-3z" fill="#00AC47"/><path d="M11 8L8 13l-3 5 3-5h3l3-5h-3z" fill="#EA4335" opacity="0.9"/></svg>`,
+        chatgpt: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="12" fill="#10A37F"/><path d="M16 9.5L12 7l-4 2.5v5L12 17l4-2.5v-5zM12 9l3 1.7v3.6L12 16l-3-1.7v-3.6L12 9z" fill="#fff"/></svg>`,
+        skool: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#FFD400"/><path d="M8 9c0-1.4 1.5-2 3-2 1.6 0 3 .8 3 2.3 0 1.2-.8 1.7-2.3 2.3-1.5.6-2.4 1.2-2.4 2.5 0 1.5 1.2 2.5 2.8 2.5 1.7 0 2.7-.8 3-2" stroke="#000" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>`,
+        browser: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="11" fill="none" stroke="#94a3b8" stroke-width="1.6"/><circle cx="12" cy="12" r="11" fill="none" stroke="#94a3b8" stroke-width="1.6"/><path d="M2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20" stroke="#94a3b8" stroke-width="1.2" fill="none"/></svg>`,
+        crm: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="4" width="18" height="16" rx="2" fill="#6366f1"/><circle cx="12" cy="10" r="2.5" fill="#fff"/><path d="M7 16c0-2.5 2.2-4 5-4s5 1.5 5 4" stroke="#fff" stroke-width="1.4" fill="none"/></svg>`,
+        kie: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#000"/><path d="M6 6h2.4v5l4.2-5h3l-4.5 5.3 5 6.7h-3.2l-3.6-5L8.4 14v4H6V6z" fill="#fff"/></svg>`,
+        elevenlabs: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#000"/><path d="M9 7h2v10H9zM13 7h2v10h-2z" fill="#fff"/></svg>`,
+        seedance: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#7c3aed"/><path d="M12 5l2.5 4.5L19 11l-4.5 2.5L12 18l-2.5-4.5L5 11l4.5-1.5z" fill="#fff"/></svg>`,
+        apollo: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="12" fill="#3B82F6"/><circle cx="12" cy="12" r="6" fill="none" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="2.5" fill="#fff"/></svg>`,
+        hunter: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#FB6D4D"/><path d="M7 7h2v10H7zM10 11.5l4-4.5h2.5L13 11l3.5 6H14l-2.5-4.5-1.5 1.7V17H8v-5.5z" fill="#fff"/></svg>`,
+        manychat: `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="4" fill="#1a73e8"/><path d="M5 9c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v4c0 1.1-.9 2-2 2h-7l-3 3v-3H7c-1.1 0-2-.9-2-2V9z" fill="#fff"/></svg>`,
+    };
+    function platformLogoHtml(name) {
+        if (!name) return '';
+        const svg = platformLogos[name];
+        if (!svg) return `<div class="window-platform-logo" style="background:#334155;color:#fff;font-size:11px;font-weight:700;">${name.charAt(0).toUpperCase()}</div>`;
+        return `<div class="window-platform-logo">${svg}</div>`;
+    }
+
+    function buildWindows() {
+        demoRow.innerHTML = '';
+        windowsManifest.forEach((w, i) => {
+            const color = themeColors[i % themeColors.length];
+            const wrap = document.createElement('div');
+            wrap.className = 'demo-window';
+            wrap.style.setProperty('--theme-color', color);
+            wrap.dataset.windowId = w.id;
+            const logo = platformLogoHtml(w.platform);
+            wrap.innerHTML = `
+                <div class="window-titlebar ${w.platform ? '' : 'no-platform'}">
+                    <div class="traffic-lights"><span></span><span></span><span></span></div>
+                    ${logo}
+                    <div class="window-title">${w.title || w.type}</div>
+                    <div class="window-status" data-status>idle</div>
+                </div>
+                <div class="window-body" data-body></div>
+                <div class="wait-overlay" data-wait>
+                    <div class="wait-spinner"></div>
+                    <div class="wait-label"><span data-wait-label>İşleniyor</span><span class="wait-dots"></span></div>
+                </div>`;
+            demoRow.appendChild(wrap);
+            windowEls[w.id] = {
+                wrap,
+                titlebarStatus: wrap.querySelector('[data-status]'),
+                body: wrap.querySelector('[data-body]'),
+                waitOverlay: wrap.querySelector('[data-wait]'),
+                waitLabel: wrap.querySelector('[data-wait-label]')
+            };
+        });
+    }
+
+    function clearAllWaitOverlays() {
+        for (const id in windowEls) {
+            const el = windowEls[id];
+            if (el && el.waitOverlay) el.waitOverlay.classList.remove('show');
+        }
+        document.querySelectorAll('[data-wait-badge]').forEach(b => b.classList.remove('show'));
+    }
+
+    // Compute window state at step k (recompute from start — supports backward nav)
+    function windowStateAt(windowId, stepIndex) {
+        const w = windowsManifest.find(x => x.id === windowId);
+        if (!w) return null;
+        const r = renderers[w.type];
+        if (!r) return null;
+        let state = r.init();
+        for (let i = 0; i <= stepIndex && i < nodesData.length; i++) {
+            const action = nodesData[i].frames && nodesData[i].frames[windowId];
+            // Strip `_new` flags from previous steps so only the current step animates
+            if (i < stepIndex) {
+                state = stripNew(r.apply(state, action));
+            } else {
+                state = r.apply(state, action);
+            }
+        }
+        return state;
+    }
+    function stripNew(s) {
+        if (!s || typeof s !== 'object') return s;
+        const out = Array.isArray(s) ? [] : {};
+        for (const k in s) {
+            const v = s[k];
+            if (Array.isArray(v)) out[k] = v.map(item => (item && typeof item === 'object') ? { ...item, _new: false } : item);
+            else if (v && typeof v === 'object' && '_new' in v) out[k] = { ...v, _new: false };
+            else out[k] = v;
+        }
+        return out;
+    }
+
+    // Render all windows for current step
+    function renderWindows() {
+        windowsManifest.forEach(w => {
+            const r = renderers[w.type];
+            const el = windowEls[w.id];
+            if (!r || !el) return;
+            const state = currentIndex < 0 ? r.init() : windowStateAt(w.id, currentIndex);
+            r.render(state, el.body);
+
+            // Status badge — busy if this step has an action for this window
+            const action = currentIndex >= 0 && nodesData[currentIndex].frames ? nodesData[currentIndex].frames[w.id] : null;
+            const statusEl = el.titlebarStatus;
+            statusEl.classList.remove('busy', 'done');
+            if (action) { statusEl.classList.add('busy'); statusEl.textContent = 'işliyor'; }
+            else if (currentIndex >= 0) { statusEl.classList.add('done'); statusEl.textContent = 'hazır'; }
+            else { statusEl.textContent = 'idle'; }
+
+            // Focus glow when this window has an action this step
+            el.wrap.classList.toggle('focus', !!action);
+        });
+    }
+
+    // Build flow nodes (existing visual)
+    function renderNodes() {
+        flowContainer.innerHTML = '';
+        nodesData.forEach((data, index) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'node-wrapper';
+            wrapper.id = `node-${index}`;
+            const color = themeColors[index % themeColors.length];
+            wrapper.style.setProperty('--theme-color', color);
+
+            let subStepsHtml = '';
+            if (data.subSteps && data.subSteps.length) {
+                subStepsHtml = `<div class="sub-steps">` + data.subSteps.map((step, sIdx) => `
+                    <div class="sub-step" id="substep-${index}-${sIdx}">
+                        <div class="status-icon"><div class="status-dot"></div><div class="status-check">✓</div></div>
+                        <span>${step}</span>
+                    </div>`).join('') + `</div>`;
+            }
+
+            wrapper.innerHTML = `
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-icon-wrapper"><span class="node-icon">${data.icon}</span></div>
+                        <div>
+                            <h3 class="node-title">${data.title}</h3>
+                            <div class="node-subtitle">Adım ${index + 1}</div>
+                        </div>
+                    </div>
+                    <div class="node-body">
+                        <p class="node-desc">${data.desc || ''}</p>
+                        ${subStepsHtml}
+                    </div>
+                </div>`;
+            flowContainer.appendChild(wrapper);
+
+            if (index < nodesData.length - 1) {
+                const connector = document.createElement('div');
+                connector.className = 'connector-wrapper';
+                connector.id = `connector-${index}`;
+                const nextWaitLabel = nodesData[index + 1].waitLabel || (nodesData[index + 1].waitMs ? 'Bekleniyor…' : '');
+                connector.innerHTML = `
+                    <svg class="connector-svg" preserveAspectRatio="none">
+                        <path class="connector-path" d="M 0 20 C 40 20, 40 20, 80 20"></path>
+                        <path class="connector-path-active" d="M 0 20 C 40 20, 40 20, 80 20" style="--theme-color: ${color}"></path>
+                    </svg>
+                    <div class="data-packet" style="--theme-color: ${color}"></div>
+                    ${nextWaitLabel ? `<div class="connector-wait" data-wait-badge>⏳ ${nextWaitLabel}</div>` : ''}`;
+                flowContainer.appendChild(connector);
+            }
+        });
+
+        setTimeout(() => {
+            if (nodesData.length) {
+                centerOnElement(document.getElementById('node-0'));
+                setTimeout(nextNode, 250);
+            }
+        }, 80);
+    }
+
+    function centerOnElement(el) {
+        if (!el) return;
+        const elRect = el.getBoundingClientRect();
+        const canvasRect = flowCanvas.getBoundingClientRect();
+        const target = flowCanvas.scrollLeft + (elRect.left - canvasRect.left) - (canvasRect.width / 2) + (elRect.width / 2);
+        flowCanvas.scrollTo({ left: target, behavior: 'smooth' });
+    }
+
+    async function updateFlowState() {
+        const wrappers = document.querySelectorAll('.node-wrapper');
+        const connectors = document.querySelectorAll('.connector-wrapper');
+
+        wrappers.forEach((el, idx) => {
+            el.classList.remove('active', 'completed');
+            if (idx < currentIndex) {
+                el.classList.add('completed');
+                el.querySelectorAll('.sub-step').forEach(s => {
+                    s.classList.add('animate-in', 'completed');
+                    s.classList.remove('processing');
+                });
+            } else if (idx === currentIndex) {
+                el.classList.add('active');
+                centerOnElement(el);
+            } else {
+                el.querySelectorAll('.sub-step').forEach(s => {
+                    s.classList.remove('animate-in', 'processing', 'completed');
+                });
+            }
+        });
+
+        connectors.forEach((el, idx) => {
+            el.classList.remove('active');
+            const badge = el.querySelector('[data-wait-badge]');
+            if (badge) badge.classList.remove('show');
+            if (idx < currentIndex) el.classList.add('active');
+        });
+    }
+
+    async function animateSubSteps(nodeIndex, subSteps, token) {
+        for (let i = 0; i < subSteps.length; i++) {
+            if (token !== stepLockToken) return;
+            const stepEl = document.getElementById(`substep-${nodeIndex}-${i}`);
+            if (!stepEl) return;
+            stepEl.classList.add('animate-in', 'processing');
+            await sleep(1100 + Math.random() * 700);
+            if (token !== stepLockToken) return;
+            stepEl.classList.remove('processing');
+            stepEl.classList.add('completed');
+        }
+    }
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function showWait(stepIndex, ms, label, token) {
+        const data = nodesData[stepIndex];
+        const focused = data.frames ? Object.keys(data.frames) : [];
+        focused.forEach(id => {
+            const el = windowEls[id];
+            if (!el) return;
+            el.waitLabel.textContent = label || 'İşleniyor';
+            el.waitOverlay.classList.add('show');
+        });
+        const prevConnector = document.getElementById(`connector-${stepIndex - 1}`);
+        const badge = prevConnector && prevConnector.querySelector('[data-wait-badge]');
+        if (badge) badge.classList.add('show');
+
+        await sleep(ms);
+        // Always clear overlays on this set, even if token changed (defensive)
+        focused.forEach(id => windowEls[id] && windowEls[id].waitOverlay.classList.remove('show'));
+        if (badge) badge.classList.remove('show');
+    }
+
+    async function applyStep(targetIndex) {
+        const token = ++stepLockToken;
+        clearAllWaitOverlays();   // hard reset on every nav — eliminates stuck overlays
+        currentIndex = targetIndex;
+        await updateFlowState();
+        renderWindows();
+
+        const data = nodesData[targetIndex];
+        if (!data) return;
+
+        if (data.waitMs && data.waitMs > 0) {
+            await showWait(targetIndex, data.waitMs * 1.5, data.waitLabel, token);
+            if (token !== stepLockToken) return;
+        }
+
+        if (data.subSteps && data.subSteps.length) {
+            animateSubSteps(targetIndex, data.subSteps, token);
+        }
+    }
+
+    function nextNode() { if (currentIndex < nodesData.length - 1) applyStep(currentIndex + 1); }
+    function prevNode() { if (currentIndex > 0) applyStep(currentIndex - 1); else if (currentIndex === 0) applyStep(-1); }
+
+    window.addEventListener('keydown', (e) => {
+        if (['Space', 'ArrowRight'].includes(e.code)) { e.preventDefault(); nextNode(); }
+        if (['ArrowLeft'].includes(e.code))           { e.preventDefault(); prevNode(); }
+    });
+
+    // Drag to scroll
+    let isDown = false, startX, scrollStart;
+    flowCanvas.addEventListener('mousedown', e => { isDown = true; startX = e.pageX - flowCanvas.offsetLeft; scrollStart = flowCanvas.scrollLeft; flowCanvas.style.cursor = 'grabbing'; });
+    flowCanvas.addEventListener('mouseleave', () => { isDown = false; flowCanvas.style.cursor = 'grab'; });
+    flowCanvas.addEventListener('mouseup',    () => { isDown = false; flowCanvas.style.cursor = 'grab'; });
+    flowCanvas.addEventListener('mousemove', e => {
+        if (!isDown) return;
+        e.preventDefault();
+        flowCanvas.scrollLeft = scrollStart - ((e.pageX - flowCanvas.offsetLeft) - startX);
+    });
+
+    buildWindows();
+    renderNodes();
+    renderWindows();
+    </script>
+</body>
+</html>
