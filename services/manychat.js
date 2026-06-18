@@ -57,13 +57,29 @@ async function fetchWithRetry(url, options, retries = 1) {
   }
 }
 
-// Telefon E.164 normalizasyonu — minimal inline (utils/phone.js bağımlılığı kaldırıldı).
-// ManyChat aramaları + olmadan da denenir, fallback'ler aşağıdaki katmanlarda.
+// Telefon E.164 normalizasyonu — bağımlılıksız inline, TR varsayılan.
+// Türkiye cep numarasını HER ZAMAN +90 ülke koduyla döndürür:
+//   5XXXXXXXXX (10) / 05XXXXXXXXX (11) / 905XXXXXXXXX (12) / +905... → hepsi +905XXXXXXXXX
+//   "0090..." çıkış kodu temizlenir. Yabancı/tanınmayan numaraya +90 ZORLANMAZ.
+// NOT: cron yolu (cron.js) telefonu Notion'dan ham çekip phoneValidator'ı atladığı için
+// "+90 bazen var bazen yok" buradan doğuyordu; bu sınır artık her zaman +90 garanti eder.
 function normalizePhone(phone) {
   if (!phone) return phone;
-  let cleaned = String(phone).replace(/[\s\-()]/g, '');
-  if (!cleaned.startsWith('+')) cleaned = '+' + cleaned;
-  return cleaned;
+  let digits = String(phone).replace(/\D/g, ''); // sadece rakam
+  if (!digits) return phone;
+
+  // Uluslararası çıkış kodu "00" → at (0090... → 90...)
+  if (digits.startsWith('00')) digits = digits.slice(2);
+
+  // Türkiye cep numarası kalıpları → +90 garanti
+  if (digits.length === 10 && digits.startsWith('5')) {
+    digits = '90' + digits;            // 5XXXXXXXXX  → 905XXXXXXXXX
+  } else if (digits.length === 11 && digits.startsWith('05')) {
+    digits = '90' + digits.slice(1);   // 05XXXXXXXXX → 905XXXXXXXXX
+  }
+  // 905XXXXXXXXX (12) zaten doğru; yabancı/tanınmayan format olduğu gibi kalır
+
+  return '+' + digits;
 }
 
 async function getCustomFieldId(fieldName) {
