@@ -70,8 +70,10 @@ async function sendOnboardingEmail(toEmail, firstName, dayNumber) {
   const emailContent = getEmailContent(firstName, dayNumber);
   let html = emailContent.html;
 
-  // Day 0: WhatsApp CTA butonu enjekte et (üye isterse WA'ya geçebilsin)
-  if (dayNumber === 0 && config.waBusinessPhone) {
+  // Day 0: WhatsApp CTA butonu (üye isterse WA'ya geçebilsin).
+  // Yalnızca opt-in akışı düzgün çalışıyorsa göster (WA_OPTIN_ENABLED) — yoksa
+  // butona basan üyeye sessizce hiçbir şey olmaz (ölü buton / yanlış onay).
+  if (dayNumber === 0 && config.waBusinessPhone && config.waOptinEnabled) {
     html = html.replace('<!-- WA_CTA_PLACEHOLDER -->', buildWaCta(config.waBusinessPhone));
     log.info(`[resend] Day 0: WA CTA butonu enjekte edildi`);
   } else {
@@ -354,7 +356,7 @@ async function sendHybridFallbackEmail(toEmail, firstName, dayNumber, waBusiness
   // WA CTA sadece Gün 0 (hoş geldin) mailinde gösterilir.
   // Gün 1-6'da seri zaten email üzerinden ilerliyor; "WhatsApp'a geç" demek anlamsız.
   let subject;
-  if (dayNumber === 0 && waBusinessPhone) {
+  if (dayNumber === 0 && waBusinessPhone && config.waOptinEnabled) {
     html = html.replace('<!-- WA_CTA_PLACEHOLDER -->', buildWaCta(waBusinessPhone));
     subject = `Sana WhatsApp'tan ulaşamadık – ${emailContent.subject}`;
     log.info(`[resend] Hibrit fallback: Gün 0 WA CTA enjekte edildi (${waBusinessPhone})`);

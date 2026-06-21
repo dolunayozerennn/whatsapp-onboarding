@@ -57,6 +57,12 @@ module.exports = {
     cronTimezone: process.env.CRON_TIMEZONE || 'Europe/Istanbul',
     cronSchedule: process.env.CRON_SCHEDULE || '0 12 * * *',
     waBusinessPhone: process.env.WA_BUSINESS_PHONE || '',
+    // Fallback e-postasındaki "WhatsApp'tan Al" butonu. VARSAYILAN KAPALI:
+    // ManyChat "Onboarding Opt-in" akışı durdurulmuş ve webhook auth'u doğrulanmamış
+    // durumda; buton açıkken kullanıcıya "geçtin" denip arka uçta sessizce başarısız
+    // olma (yanlış onay) riski var. Opt-in akışı düzgün kurulup test edilince
+    // WA_OPTIN_ENABLED=true ile aç. (2026-06-21 denetim.)
+    waOptinEnabled: process.env.WA_OPTIN_ENABLED === 'true',
     webhookSecret: process.env.WEBHOOK_SECRET, // artık zorunlu — fail-fast tarafından garanti
     adminSecret: process.env.ADMIN_SECRET || null
   }
