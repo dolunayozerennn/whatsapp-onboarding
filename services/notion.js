@@ -243,6 +243,18 @@ async function getActiveDualMembers() {
   });
 }
 
+// ─── Watchdog: "bekliyor"da takılı GERÇEK üyeler ──────────────
+// "bekliyor" hiçbir gönderim döngüsü tarafından okunmaz (sadece whatsapp/email/dual
+// işlenir). Ödeme yapmış ama Zap #2'yi (telefon sorusu) tamamlamamış üye burada
+// sessizce + uyarısız takılır. Bu sorgu o satırları çeker; cron sweep'i kullanılır
+// olan kanalı (email/telefon) olanları TEK seferlik admin digest'inde raporlar.
+async function getStuckBekliyorMembers() {
+  return paginatedQuery('bekliyor', {
+    property: "Onboarding Durumu",
+    select: { equals: "bekliyor" }
+  });
+}
+
 function parseMember(page) {
   return {
     id: page.id,
@@ -396,6 +408,7 @@ module.exports = {
   getActiveOnboardingMembers,
   getActiveEmailMembers,
   getActiveDualMembers,
+  getStuckBekliyorMembers,
   appendNote,
   validateSchema,
   tryAcquireCronLock

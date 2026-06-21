@@ -10,10 +10,12 @@
 const cron = require('node-cron');
 const moment = require('moment-timezone');
 const { ONBOARDING_FLOWS } = require('./config/templates');
+const { decide } = require('./services/decision');
 const { config } = require('./config/env');
 const notion = require('./services/notion');
 const manychat = require('./services/manychat');
 const resend = require('./services/resend');
+const { isPermanentError, shouldDemoteDualToEmail } = require('./services/wa_error');
 const log = require('./utils/logger');
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -63,30 +65,8 @@ async function retryOn429(fn, label) {
   throw lastErr;
 }
 
-// Kalıcı hata sınıflandırması: bunlar 3-strike beklenmeden doğrudan DLQ'ya gider.
-// Geçici hata (429, 5xx, timeout, network) ise mevcut error counter mantığında kalır.
-//   - WhatsApp 131xxx serisi: invalid recipient, blocked user, opted-out, vb.
-//   - Resend 4xx (429 hariç): geçersiz email, domain yasaklı, vb.
-//   - Notion validation 400'leri
-function isPermanentError(err) {
-  if (!err) return false;
-  const msg = String(err.message || '');
-  const status = err.status || err.statusCode;
-  // Geçici hatalar — kalıcı DEĞİL
-  if (status === 429 || (status >= 500 && status < 600)) return false;
-  if (err.name === 'AbortError' || err.name === 'TimeoutError') return false;
-  if (/timeout|aborted|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.test(msg)) return false;
-  // ManyChat wa_id validation: numarada WhatsApp yok — kalıcı, retry beyhude.
-  if (err.code === 'WA_ID_INVALID' || err.code === 'WA_UNREACHABLE') return true;
-  // Kalıcı sayılan kalıplar
-  if (status >= 400 && status < 500) return true;
-  if (/HTTP 4\d\d/.test(msg)) return true;
-  if (/\(#13\d{4}\)/.test(msg)) return true;        // WhatsApp Cloud 131xxx error codes
-  if (/invalid (recipient|email|phone)/i.test(msg)) return true;
-  if (/recipient.*not.*valid/i.test(msg)) return true;
-  if (/blocked|opted.?out|unsubscribed/i.test(msg)) return true;
-  return false;
-}
+// NOT: isPermanentError + shouldDemoteDualToEmail artık services/wa_error.js'te
+// (saf + test edilebilir). cron.js onları yukarıda require ediyor.
 
 // dual-channel retry tracking: lastError üzerinde "channel-failed-day-N" flag.
 // Format: "wa-failed-day-3" | "email-failed-day-3" | normal hata mesajı
@@ -130,10 +110,11 @@ cron.schedule(config.cronSchedule, async () => {
         break;
       }
       try {
-        const today = moment.tz('Europe/Istanbul').startOf('day');
-        const startDay = moment.tz(member.onboardingStartDate, 'YYYY-MM-DD', 'Europe/Istanbul').startOf('day');
+        // SAF KARAR: hangi gün / hangi flow / hangi kanal (services/decision.js).
+        // Yan-etkiler (gönderme, Notion güncelleme, alarm) burada uygulanır.
+        const decision = decide(member, undefined, 'whatsapp');
 
-        if (!startDay.isValid()) {
+        if (decision.action === 'invalid_date') {
           log.error(`[CRON] Geçersiz onboardingStartDate — memberName: ${member.firstName} ${member.lastName}, notionId: ${member.id}`);
           await notion.updatePage(member.id, {
             onboardingStatus: 'error',
@@ -149,46 +130,34 @@ cron.schedule(config.cronSchedule, async () => {
           continue;
         }
 
-        const daysDiff = today.diff(startDay, 'days');
-
-        const expectedDay = member.onboardingStep + 1;
-
-        // Faz 3 NEW (5am cutoff bug fix — savunmacı):
-        // Day 0 webhook'tan gönderildi (step=0). Aynı gün cron çalışırsa
-        // (manuel kayıt, clock skew, vs.) daysDiff=0 olur ve `0 <= 0`
-        // zaten skip eder; ancak gelecek tarihli startDate (negatif diff)
-        // riskine karşı açıkça `< 1` guard'ı koyuyoruz.
-        if (daysDiff < 1) {
-          log.info(`[CRON:wa] ${member.firstName} skip — startDate=${member.onboardingStartDate} bugün/gelecek (daysDiff=${daysDiff})`);
-          skipped++;
-          continue;
-        }
-
-        // Zamanı gelmediyse atla
-        if (daysDiff <= member.onboardingStep) {
+        if (decision.action === 'skip_not_due') {
+          if (decision.reason === 'today_or_future') {
+            log.info(`[CRON:wa] ${member.firstName} skip — startDate=${member.onboardingStartDate} bugün/gelecek`);
+          }
           skipped++;
           continue;
         }
 
         // 7. günden sonra tamamla
-        if (expectedDay > 6) {
+        if (decision.action === 'complete') {
           await notion.updatePage(member.id, { onboardingStatus: "tamamlandı" });
           log.info(`Tamamlandı: ${member.firstName} ${member.lastName}`);
           completed++;
           continue;
         }
 
-        // Flow bilgisini al
-        const flowConfig = ONBOARDING_FLOWS[expectedDay];
-        if (!flowConfig || !flowConfig.flow_id || flowConfig.flow_id.startsWith('TODO_')) {
-          log.error(`Flow ID yapılandırılmamış: Gün ${expectedDay} — ${member.firstName} atlanıyor`);
+        // Flow yapılandırılmamış
+        if (decision.action === 'flow_unconfigured') {
+          log.error(`Flow ID yapılandırılmamış: Gün ${decision.day} — ${member.firstName} atlanıyor`);
           errors++;
           continue;
         }
 
+        const expectedDay = decision.day;
+
         // ManyChat'ten gönder — 429 retry sarmalı
         await retryOn429(
-          () => manychat.ensureSubscriberAndSendFlow(member.phone, member.firstName, flowConfig.flow_id),
+          () => manychat.ensureSubscriberAndSendFlow(member.phone, member.firstName, decision.flow.flow_id),
           `WA[${member.firstName}/day${expectedDay}]`
         );
 
@@ -293,10 +262,9 @@ cron.schedule(config.cronSchedule, async () => {
             break;
           }
           try {
-            const today = moment.tz('Europe/Istanbul').startOf('day');
-            const startDay = moment.tz(member.onboardingStartDate, 'YYYY-MM-DD', 'Europe/Istanbul').startOf('day');
+            const decision = decide(member, undefined, 'email');
 
-            if (!startDay.isValid()) {
+            if (decision.action === 'invalid_date') {
               log.error(`[CRON] Geçersiz onboardingStartDate (Email) — memberName: ${member.firstName} ${member.lastName}, notionId: ${member.id}`);
               await notion.updatePage(member.id, {
                 onboardingStatus: 'error',
@@ -312,29 +280,25 @@ cron.schedule(config.cronSchedule, async () => {
               continue;
             }
 
-            const daysDiff = today.diff(startDay, 'days');
-
             // P0 #3 — Day 0 double-send koruması:
-            // Webhook (server.js) email-status user'a Day 0 mailini zaten attı ve
-            // onboardingStartDate=bugün set etti. Eğer cron aynı gün çalışırsa
-            // (örn. 5am < 6 case'inde startDate=dün hesaplanabilir veya manuel kayıt
-            // yapılmış olabilir), `daysDiff < 1` olduğunda hiçbir email gönderme.
-            // Sadece startDate KESİNLİKLE dünden eskiyse devam et.
-            if (daysDiff < 1) {
-              log.info(`[CRON:email] ${member.firstName} skip — startDate=${member.onboardingStartDate} bugün/gelecek (daysDiff=${daysDiff})`);
-              skipped++;
+            // today_or_future → skipped++ (bugün/gelecek tarihli).
+            // step_caught_up → sessiz continue (zamanı gelmedi, sayaç artmaz —
+            // orijinal davranış birebir korundu).
+            if (decision.action === 'skip_not_due') {
+              if (decision.reason === 'today_or_future') {
+                log.info(`[CRON:email] ${member.firstName} skip — startDate=${member.onboardingStartDate} bugün/gelecek`);
+                skipped++;
+              }
               continue;
             }
 
-            if (daysDiff <= member.onboardingStep) continue;
-
-            const expectedDay = member.onboardingStep + 1;
-
-            if (expectedDay > 6) {
+            if (decision.action === 'complete') {
               await notion.updatePage(member.id, { onboardingStatus: "tamamlandı" });
               completed++;
               continue;
             }
+
+            const expectedDay = decision.day;
 
             await retryOn429(
               () => resend.sendOnboardingEmail(member.email, member.firstName, expectedDay),
@@ -424,10 +388,9 @@ cron.schedule(config.cronSchedule, async () => {
           break;
         }
         try {
-          const today = moment.tz('Europe/Istanbul').startOf('day');
-          const startDay = moment.tz(member.onboardingStartDate, 'YYYY-MM-DD', 'Europe/Istanbul').startOf('day');
+          const decision = decide(member, undefined, 'dual');
 
-          if (!startDay.isValid()) {
+          if (decision.action === 'invalid_date') {
             log.error(`[CRON-DUAL] Geçersiz onboardingStartDate — ${member.firstName}, ID: ${member.id}`);
             await notion.updatePage(member.id, {
               onboardingStatus: 'error',
@@ -443,38 +406,23 @@ cron.schedule(config.cronSchedule, async () => {
             continue;
           }
 
-          const daysDiff = today.diff(startDay, 'days');
-
-          // P0 #3 — Day 0 double-send koruması (dual için de geçerli):
-          // Webhook dual user'a hem WA Day 0 hem Email Day 0 attı.
-          // Aynı günde cron tekrar göndermesin.
-          if (daysDiff < 1) {
-            log.info(`[CRON-DUAL] ${member.firstName} skip — startDate=${member.onboardingStartDate} bugün (daysDiff=${daysDiff})`);
+          // P0 #3 + P1 #12: bugün/gelecek VE step-caught-up → skip (orijinalde
+          // ikisi de skipped++ idi, korundu).
+          if (decision.action === 'skip_not_due') {
+            if (decision.reason === 'today_or_future') {
+              log.info(`[CRON-DUAL] ${member.firstName} skip — startDate=${member.onboardingStartDate} bugün`);
+            }
             skipped++;
             continue;
           }
 
-          // P1 #12 — Atomic dual-channel retry tracking
-          // Önceki cron'da bir kanal başarısız olduysa lastError = "wa-failed-day-N"
-          // veya "email-failed-day-N" şeklindedir. Bu durumda step ilerletilmemiştir.
-          // Yalnızca başarısız olan kanalı yeniden dene.
-          const retryFlag = parseRetryFlag(member.lastError);
-          let targetDay;
-          let onlyChannel = null; // "wa" | "email" | null (her ikisi)
-
-          if (retryFlag && retryFlag.day === member.onboardingStep + 1) {
-            targetDay = retryFlag.day;
-            onlyChannel = retryFlag.channel;
+          const targetDay = decision.day;
+          const onlyChannel = decision.retryOnly; // "wa" | "email" | null
+          if (onlyChannel) {
             log.info(`[CRON-DUAL] Retry-only mode: ${member.firstName} day ${targetDay} kanal=${onlyChannel}`);
-          } else {
-            if (daysDiff <= member.onboardingStep) {
-              skipped++;
-              continue;
-            }
-            targetDay = member.onboardingStep + 1;
           }
 
-          if (targetDay > 6) {
+          if (decision.action === 'complete') {
             await notion.updatePage(member.id, { onboardingStatus: "tamamlandı" });
             log.info(`[CRON-DUAL] Tamamlandı: ${member.firstName}`);
             completed++;
@@ -487,10 +435,9 @@ cron.schedule(config.cronSchedule, async () => {
           let waErr = null;
           if (!waSkipped) {
             try {
-              const flowConfig = ONBOARDING_FLOWS[targetDay];
-              if (flowConfig && flowConfig.flow_id && !flowConfig.flow_id.startsWith('TODO_') && member.phone) {
+              if (decision.flow && member.phone) {
                 await retryOn429(
-                  () => manychat.ensureSubscriberAndSendFlow(member.phone, member.firstName, flowConfig.flow_id),
+                  () => manychat.ensureSubscriberAndSendFlow(member.phone, member.firstName, decision.flow.flow_id),
                   `DUAL-WA[${member.firstName}/day${targetDay}]`
                 );
                 dualWaSent++;
@@ -561,9 +508,13 @@ cron.schedule(config.cronSchedule, async () => {
             continue;
           }
 
-          // WA_ID_INVALID özel durum: numarada WhatsApp yok → kullanıcıyı email-only'ye düşür.
-          // Email başarılıysa onboarding'i durdurmak yerine email kanalında devam ettir.
-          if (waErr && !emailErr && emailSentOk && (waErr.code === 'WA_ID_INVALID' || waErr.code === 'WA_UNREACHABLE')) {
+          // KALICI WhatsApp hatası + email başarılı → email-only'ye düşür (donmayı engelle).
+          // Eskiden yalnızca tipli WA_ID_INVALID/WA_UNREACHABLE bu yola giriyordu; diğer
+          // KALICI WhatsApp hataları (ör. Meta 131xxx teslim kodu, jenerik sendFlow 4xx)
+          // üyeyi email çalışsa bile "error"da donduruyordu (Bayram vakası, 2026-06-21 denetim).
+          // Artık herhangi bir kalıcı WA hatasında, email gittiyse onboarding email'de devam eder.
+          // Geçici WA hataları bu gate'e girmez → aşağıdaki retry-flag yoluna düşer (WA tekrar denenir).
+          if (shouldDemoteDualToEmail(waErr, emailErr, emailSentOk)) {
             await notion.updatePage(member.id, {
               onboardingStep: targetDay,
               onboardingStatus: 'email',
@@ -571,8 +522,13 @@ cron.schedule(config.cronSchedule, async () => {
               errorCount: 0,
               lastError: ''
             });
-            await notion.appendNote(member.id, `[CRON-DUAL] WhatsApp hesabı bulunamadı (wa_id), email-only akışına alındı. Day ${targetDay}.`);
-            log.info(`[CRON-DUAL] WA_ID_INVALID → email-only: ${member.firstName} day ${targetDay}`);
+            const sebep = (waErr.code === 'WA_ID_INVALID')
+              ? `WhatsApp hesabı bulunamadı (wa_id)`
+              : (waErr.code === 'WA_UNREACHABLE')
+                ? `WhatsApp ulaşılamadı (Meta engeli)`
+                : `WhatsApp kalıcı hata verdi`;
+            await notion.appendNote(member.id, `[CRON-DUAL] ${sebep}, email-only akışına alındı (donma engellendi). Day ${targetDay}.`);
+            log.info(`[CRON-DUAL] Kalıcı WA hatası → email-only: ${member.firstName} day ${targetDay} (${waErr.code || 'generic-permanent'})`);
             await new Promise(resolve => setTimeout(resolve, 2000));
             continue;
           }
@@ -661,6 +617,50 @@ cron.schedule(config.cronSchedule, async () => {
       }
     } catch (dualBatchErr) {
       log.error(`[CRON-DUAL] Batch hatası: ${dualBatchErr.message}`, dualBatchErr.stack);
+    }
+
+    // ─── Takılı üye nöbetçisi (Watchdog) — sessiz kaybı görünür kıl ───
+    // "bekliyor"da takılı GERÇEK üyeler (ödedi ama Zap #2 hiç gelmedi) hiçbir
+    // döngüde işlenmez ve hiç uyarı üretmez. Burada kullanılabilir kanalı
+    // (email veya telefon) olan, 2+ gündür bekleyen ve daha önce raporlanmamış
+    // üyeleri TEK seferlik admin digest'inde bildiririz. Her üye yalnız bir kez
+    // raporlanır (Notlar'a "[WATCHDOG-ALERTED]" markeri yazılır → tekrar etmez).
+    try {
+      const stuck = await notion.getStuckBekliyorMembers();
+      const nowMs = Date.now();
+      const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
+      const toAlert = stuck.filter(m => {
+        if (m.firstName === '__CRON_RUN_LOCK__') return false;
+        const hasChannel = (m.email && m.email.includes('@')) || (m.phone && m.phone.length > 5);
+        if (!hasChannel) return false; // kanalsız = eksik kayıt, kapsam dışı (Dolunay: free/eski yoksay)
+        if ((m.notes || '').includes('[WATCHDOG-ALERTED]')) return false; // zaten raporlandı
+        // 2+ gündür bekliyor mu? (kayıt tarihi varsa ona bak, yoksa raporla)
+        if (m.registrationDate) {
+          const regMs = Date.parse(m.registrationDate);
+          if (!isNaN(regMs) && (nowMs - regMs) < TWO_DAYS) return false; // çok yeni, zaman tanı
+        }
+        return true;
+      });
+
+      if (toAlert.length > 0) {
+        const lines = toAlert.map(m =>
+          `• ${m.firstName} ${m.lastName} — ${m.email ? 'e-posta var' : 'telefon var'}, ${m.registrationDate || 'kayıt tarihi yok'} (id: ${m.id})`
+        ).join('\n');
+        await resend.sendAdminAlertEmail(`[ONBOARDING] ${toAlert.length} üye "bekliyor"da takılı`, {
+          ozet: `${toAlert.length} ödemiş üye telefon sorusunu (Zap #2) tamamlamadığı için onboarding başlamadan takılı kaldı. Hiçbiri otomatik içerik almıyor.`,
+          uyeler: lines,
+          yapilmasi_gereken: 'İstersen bu üyeleri elle email akışına al (/admin/recover ile status=email) ya da Skool tarafında telefon sorusunu tekrar tetikle.'
+        }).catch(e => log.error('[WATCHDOG] Admin alert failed', e));
+        // Her raporlanan üyeye tek-seferlik marker → bir daha rapor edilmez
+        for (const m of toAlert) {
+          await notion.appendNote(m.id, '[WATCHDOG-ALERTED] "bekliyor"da takılı, admin bilgilendirildi.').catch(() => {});
+        }
+        log.warn(`[WATCHDOG] ${toAlert.length} takılı 'bekliyor' üyesi raporlandı`);
+      } else {
+        log.info(`[WATCHDOG] Takılı 'bekliyor' üyesi yok (taranan: ${stuck.length})`);
+      }
+    } catch (watchdogErr) {
+      log.error(`[WATCHDOG] Sweep hatası: ${watchdogErr.message}`, watchdogErr.stack);
     }
 
     log.info(`=== Cron tamamlandı: WA ${sent}, Email ${emailSent}, Dual WA:${dualWaSent} Email:${dualEmailSent}, ${skipped} atlandı, ${completed} tamamlandı, ${errors} hata ===`);

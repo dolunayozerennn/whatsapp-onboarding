@@ -2,7 +2,7 @@
 // services/phoneValidator.js — Hibrit Telefon Validasyonu v2
 // ============================================================
 // Katman 1: libphonenumber-js (Google kütüphanesi — deterministik)
-// Katman 2: Groq LLaMA 3.3 70B (metin+numara karışık girdiler için)
+// Katman 2: Groq openai/gpt-oss-120b (metin+numara karışık girdiler için)
 // Katman 3: libphonenumber-js override (Groq hatalıysa güvenlik ağı)
 // ============================================================
 // v2 Değişiklik: El yazısı regex kaldırıldı → libphonenumber-js
@@ -23,9 +23,10 @@ function maskInputForLog(input) {
 }
 
 // Groq, OpenAI-uyumlu /v1/chat/completions endpoint'i sağlar.
-// llama-3.3-70b-versatile: hızlı, ucuz, JSON mode destekli.
+// openai/gpt-oss-120b: hızlı, ucuz, JSON mode destekli (hafif çıkarım görevi).
+// Not: eski llama-3.3-70b-versatile 16 Ağustos 2026'da kapatıldı.
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_MODEL = "openai/gpt-oss-120b";
 
 const SYSTEM_PROMPT = `Sen bir veri dönüştürme aracısın. Gelen metinden telefon numarasını çıkar ve SADECE JSON döndür.
 JSON formatı:
@@ -112,8 +113,13 @@ async function groqValidate(input) {
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: safeInput }
         ],
-        max_tokens: 200,
+        // gpt-oss bir reasoning modeli; küçük max_tokens'ı düşünmeye harcayıp
+        // boş content döner. 512'ye çıkarıldı (eskiden 200).
+        max_tokens: 512,
         temperature: 0,
+        // Düşünme bütçesini kıs ve gizle ki content boş gelmesin.
+        reasoning_effort: "low",
+        reasoning_format: "hidden",
         response_format: { type: "json_object" }
       })
     });
@@ -123,7 +129,13 @@ async function groqValidate(input) {
     }
 
     const data = await response.json();
-    const result = JSON.parse(data.choices[0].message.content);
+    const message = data.choices[0].message;
+    // Savunma: content boş gelirse reasoning alanına düş (gpt-oss bazen
+    // cevabı reasoning içine yazabilir).
+    const rawContent = (message.content && message.content.trim())
+      ? message.content
+      : (message.reasoning || message.reasoning_content || message.content);
+    const result = JSON.parse(rawContent);
     // Faz 3 P0 #8: Sonucu loglarken normalized numara maskeli göster.
     const maskedResult = {
       ...result,

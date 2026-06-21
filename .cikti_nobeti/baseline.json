@@ -1,0 +1,167 @@
+{
+  "blast": "musteriye_gider",
+  "captured_at": "2026-06-18T11:14:26.205570+00:00",
+  "input": {
+    "members": [
+      {
+        "hasEmail": true,
+        "hasPhone": true,
+        "key": "38295514-0a32-817e-829c-d8e6e249e991",
+        "lastError": "",
+        "onboardingStartDate": "2026-06-17",
+        "onboardingStatus": "whatsapp",
+        "onboardingStep": 1
+      },
+      {
+        "hasEmail": true,
+        "hasPhone": true,
+        "key": "37f95514-0a32-8190-8cd4-c36537294948",
+        "lastError": "",
+        "onboardingStartDate": "2026-06-14",
+        "onboardingStatus": "whatsapp",
+        "onboardingStep": 4
+      },
+      {
+        "hasEmail": true,
+        "hasPhone": true,
+        "key": "38195514-0a32-813a-a674-d2158de8a684",
+        "lastError": "",
+        "onboardingStartDate": "2026-06-16",
+        "onboardingStatus": "email",
+        "onboardingStep": 2
+      },
+      {
+        "hasEmail": true,
+        "hasPhone": true,
+        "key": "37f95514-0a32-8169-923a-c29b26d67f16",
+        "lastError": "",
+        "onboardingStartDate": "2026-06-14",
+        "onboardingStatus": "email",
+        "onboardingStep": 4
+      },
+      {
+        "hasEmail": true,
+        "hasPhone": true,
+        "key": "38095514-0a32-81e9-82af-fc1d95959ee7",
+        "lastError": "",
+        "onboardingStartDate": "2026-06-15",
+        "onboardingStatus": "dual",
+        "onboardingStep": 3
+      },
+      {
+        "hasEmail": true,
+        "hasPhone": true,
+        "key": "38095514-0a32-8195-a454-da514e1d6907",
+        "lastError": "",
+        "onboardingStartDate": "2026-06-15",
+        "onboardingStatus": "dual",
+        "onboardingStep": 3
+      },
+      {
+        "hasEmail": true,
+        "hasPhone": true,
+        "key": "37e95514-0a32-81e2-b409-cd445caa3dd0",
+        "lastError": "",
+        "onboardingStartDate": "2026-06-13",
+        "onboardingStatus": "dual",
+        "onboardingStep": 5
+      },
+      {
+        "hasEmail": true,
+        "hasPhone": true,
+        "key": "37e95514-0a32-8137-8d70-cc499ab8f508",
+        "lastError": "",
+        "onboardingStartDate": "2026-06-13",
+        "onboardingStatus": "dual",
+        "onboardingStep": 5
+      }
+    ],
+    "today": "2026-06-18"
+  },
+  "key": "key",
+  "label": "key",
+  "output": [
+    {
+      "action": "skip_not_due",
+      "channel": "dual",
+      "channels": null,
+      "day": null,
+      "flow_id": null,
+      "key": "37e95514-0a32-8137-8d70-cc499ab8f508",
+      "reason": "step_caught_up",
+      "retryOnly": null
+    },
+    {
+      "action": "skip_not_due",
+      "channel": "dual",
+      "channels": null,
+      "day": null,
+      "flow_id": null,
+      "key": "37e95514-0a32-81e2-b409-cd445caa3dd0",
+      "reason": "step_caught_up",
+      "retryOnly": null
+    },
+    {
+      "action": "skip_not_due",
+      "channel": "dual",
+      "channels": null,
+      "day": null,
+      "flow_id": null,
+      "key": "38095514-0a32-8195-a454-da514e1d6907",
+      "reason": "step_caught_up",
+      "retryOnly": null
+    },
+    {
+      "action": "skip_not_due",
+      "channel": "dual",
+      "channels": null,
+      "day": null,
+      "flow_id": null,
+      "key": "38095514-0a32-81e9-82af-fc1d95959ee7",
+      "reason": "step_caught_up",
+      "retryOnly": null
+    },
+    {
+      "action": "skip_not_due",
+      "channel": "email",
+      "channels": null,
+      "day": null,
+      "flow_id": null,
+      "key": "37f95514-0a32-8169-923a-c29b26d67f16",
+      "reason": "step_caught_up",
+      "retryOnly": null
+    },
+    {
+      "action": "skip_not_due",
+      "channel": "email",
+      "channels": null,
+      "day": null,
+      "flow_id": null,
+      "key": "38195514-0a32-813a-a674-d2158de8a684",
+      "reason": "step_caught_up",
+      "retryOnly": null
+    },
+    {
+      "action": "skip_not_due",
+      "channel": "whatsapp",
+      "channels": null,
+      "day": null,
+      "flow_id": null,
+      "key": "37f95514-0a32-8190-8cd4-c36537294948",
+      "reason": "step_caught_up",
+      "retryOnly": null
+    },
+    {
+      "action": "skip_not_due",
+      "channel": "whatsapp",
+      "channels": null,
+      "day": null,
+      "flow_id": null,
+      "key": "38295514-0a32-817e-829c-d8e6e249e991",
+      "reason": "step_caught_up",
+      "retryOnly": null
+    }
+  ],
+  "project": "wp-onboarding-gun-flow",
+  "title": "WP Onboarding — gün/flow/kanal seçimi"
+}
